@@ -109,35 +109,6 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get install -y \
-            libmosquitto-dev
-
-      - name: Clone and build mosquitto extension
-        run: |
-          git clone -b php8 https://github.com/mgdm/Mosquitto-PHP
-          cd Mosquitto-PHP
-          phpize
-          ./configure
-          make
-          make install
-          echo "extension=mosquitto.so" > mosquitto.ini
-
-      - name: Copy mosquitto extension to build
-        run: |
-          mkdir -p static-php-cli/php-build/extensions
-          cp Mosquitto-PHP/modules/mosquitto.so static-php-cli/php-build/extensions/
-          cp Mosquitto-PHP/mosquitto.ini static-php-cli/php-build/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: php-with-mosquitto
-          path: |
-            static-php-cli/php-build/
-            Mosquitto-PHP/modules/mosquitto.so
-          
       - name: "Define"
         id: gendef
         run: |
