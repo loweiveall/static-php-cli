@@ -117,7 +117,7 @@ jobs:
       - name: Clone and build mosquitto extension
         run: |
           git clone -b php8 https://github.com/mgdm/Mosquitto-PHP
-          cd Mosquitto-PHP-php8
+          cd Mosquitto-PHP
           phpize
           ./configure
           make
@@ -127,8 +127,8 @@ jobs:
       - name: Copy mosquitto extension to build
         run: |
           mkdir -p static-php-cli/php-build/extensions
-          cp Mosquitto-PHP-php8/modules/mosquitto.so static-php-cli/php-build/extensions/
-          cp Mosquitto-PHP-php8/mosquitto.ini static-php-cli/php-build/
+          cp Mosquitto-PHP/modules/mosquitto.so static-php-cli/php-build/extensions/
+          cp Mosquitto-PHP/mosquitto.ini static-php-cli/php-build/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
