@@ -454,7 +454,11 @@
         "arg-type": "custom",
         "source": "mosquitto",
         "lib-depends": [
-            "libmosquitto"
+            "libmosquitto",
+            "libxslt"
+        ],
+        "ext-depends-windows": [
+            "openssl"
         ]
     },
     "msgpack": {

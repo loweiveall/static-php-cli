@@ -478,6 +478,12 @@
         ],
         "static-libs-windows": [
             "mosquitto.4.lib"
+        ],
+        "lib-depends": [
+            "openssl"
+        ],
+        "lib-suggests": [
+            "libxslt"
         ]
     },
     "libpng": {
