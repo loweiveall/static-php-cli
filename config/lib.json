@@ -480,7 +480,8 @@
             "mosquitto.4.lib"
         ],
         "lib-depends": [
-            "openssl"
+            "openssl",
+            "libcares"
         ],
         "lib-suggests": [
             "libxslt"

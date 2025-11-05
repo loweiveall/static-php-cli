@@ -455,7 +455,8 @@
         "source": "mosquitto",
         "lib-depends": [
             "libmosquitto",
-            "libxslt"
+            "libxslt",
+            "libcares"
         ],
         "ext-depends-windows": [
             "openssl"
