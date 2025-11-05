@@ -456,7 +456,8 @@
         "lib-depends": [
             "libmosquitto",
             "libxslt",
-            "libcares"
+            "libcares",
+            "libuuid"
         ],
         "ext-depends-windows": [
             "openssl"
