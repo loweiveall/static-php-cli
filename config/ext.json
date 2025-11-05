@@ -446,6 +446,20 @@
             "Security"
         ]
     },
+    "mosquitto": {
+        "support": {
+            "BSD": "wip"
+        },
+        "type": "external",
+        "arg-type": "custom",
+        "source": "mosquitto",
+        "lib-depends": [
+            "libmosquitto"
+        ],
+        "ext-depends-windows": [
+            "openssl"
+        ]
+    },
     "msgpack": {
         "support": {
             "BSD": "wip"

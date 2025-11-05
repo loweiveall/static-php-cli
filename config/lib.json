@@ -471,6 +471,18 @@
             "libhashkit.a"
         ]
     },
+    "libmosquitto": {
+        "source": "libmosquitto",
+        "static-libs-unix": [
+            "libmosquitto.a"
+        ],
+        "static-libs-windows": [
+            "mosquitto.4.lib"
+        ],
+        "lib-depends": [
+            "openssl"
+        ]
+    },
     "libpng": {
         "source": "libpng",
         "static-libs-unix": [

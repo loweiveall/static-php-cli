@@ -611,6 +611,15 @@
             "path": "LICENSE"
         }
     },
+    "libmosquitto": {
+        "type": "git",
+        "url": "https://github.com/eclipse/mosquitto",
+        "rev": "master",
+        "license": {
+            "type": "file",
+            "path": "LICENSE"
+        }
+    },
     "libpng": {
         "type": "git",
         "url": "https://github.com/glennrp/libpng.git",
@@ -775,6 +784,16 @@
         "path": "php-src/ext/mongodb",
         "match": "mongodb.+\\.tgz",
         "prefer-stable": true,
+        "license": {
+            "type": "file",
+            "path": "LICENSE"
+        }
+    },
+    "mosquitto": {
+        "type": "url",
+        "url": "https://pecl.php.net/get/mosquitto",
+        "path": "php-src/ext/mosquitto",
+        "filename": "mosquitto.tgz",
         "license": {
             "type": "file",
             "path": "LICENSE"
