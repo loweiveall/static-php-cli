@@ -455,9 +455,6 @@
         "source": "mosquitto",
         "lib-depends": [
             "libmosquitto"
-        ],
-        "ext-depends-windows": [
-            "openssl"
         ]
     },
     "msgpack": {
