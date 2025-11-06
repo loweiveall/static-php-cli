@@ -17,7 +17,9 @@ trait libmosquitto
             '-DWITH_WEBSOCKETS=OFF',
             '-DWITH_SRV=OFF',
             '-DWITH_CLIENTS=OFF',
-            '-DWITH_BROKER=OFF'
+            '-DWITH_BROKER=OFF',
+            '-DDOCUMENTATION=OFF',
+            '-DWITH_DOCS=OFF'
         )->build();
     }
 }
