@@ -11,10 +11,7 @@ trait libmosquitto
     protected function build(): void
     {
         UnixCMakeExecutor::create($this)->addConfigureArgs(
-            '-DWITH_STATIC_LIBRARIES=ON',
-            '-DWITH_SHARED_LIBRARIES=OFF',
-            '-DDOCUMENTATION=OFF',
-            '-DWITH_DOCS=OFF'
+            '-DBUILD_STATIC_LIBS=ON'
         )->build();
     }
 }
