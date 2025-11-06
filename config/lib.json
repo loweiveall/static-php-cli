@@ -482,10 +482,8 @@
         "lib-depends": [
             "openssl",
             "libcares",
-            "libuuid"
-        ],
-        "lib-suggests": [
-            "libxslt"
+            "libxslt",
+            "zlib"
         ]
     },
     "libpng": {
