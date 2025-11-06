@@ -474,7 +474,7 @@
     "libmosquitto": {
         "source": "libmosquitto",
         "static-libs-unix": [
-            "libmosquitto.a"
+            "libmosquitto_static.a"
         ],
         "static-libs-windows": [
             "mosquitto.4.lib"
