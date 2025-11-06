@@ -16,6 +16,7 @@ trait libmosquitto
             '-DWITH_TLS=OFF',
             '-DWITH_WEBSOCKETS=OFF',
             '-DWITH_SRV=OFF',
+            '-DDOCUMENTATION=OFF',
             '-DWITH_DOCS=OFF'
         )->build();
     }
