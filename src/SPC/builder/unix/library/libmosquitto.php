@@ -11,12 +11,12 @@ trait libmosquitto
     protected function build(): void
     {
         UnixCMakeExecutor::create($this)->addConfigureArgs(
-            '-DWITH_STATIC_LIBRARIES=yes',
-            '-DWITH_SHARED_LIBRARIES=no',
-            '-DWITH_TLS=no',
-            '-DWITH_WEBSOCKETS=no',
-            '-DWITH_SRV=no',
-            '-DWITH_DOCS=no'
+            '-DWITH_STATIC_LIBRARIES=ON',
+            '-DWITH_SHARED_LIBRARIES=OFF',
+            '-DWITH_TLS=OFF',
+            '-DWITH_WEBSOCKETS=OFF',
+            '-DWITH_SRV=OFF',
+            '-DWITH_DOCS=OFF'
         )->build();
     }
 }
