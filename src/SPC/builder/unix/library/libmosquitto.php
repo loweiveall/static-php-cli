@@ -13,11 +13,6 @@ trait libmosquitto
         UnixCMakeExecutor::create($this)->addConfigureArgs(
             '-DWITH_STATIC_LIBRARIES=ON',
             '-DWITH_SHARED_LIBRARIES=OFF',
-            '-DWITH_TLS=OFF',
-            '-DWITH_WEBSOCKETS=OFF',
-            '-DWITH_SRV=OFF',
-            '-DWITH_CLIENTS=OFF',
-            '-DWITH_BROKER=OFF',
             '-DDOCUMENTATION=OFF',
             '-DWITH_DOCS=OFF'
         )->build();
