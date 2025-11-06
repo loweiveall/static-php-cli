@@ -49,7 +49,7 @@ class UnixCMakeExecutor extends Executor
         $this->steps >= 1 && $this->shell->exec("cmake {$this->getConfigureArgs()} {$this->getDefaultCMakeArgs()} {$build_pos}");
 
         // make
-        $this->steps >= 2 && $this->shell->exec("cmake --build . -j {$this->library->getBuilder()->concurrency}");
+        $this->steps >= 2 && $this->shell->exec("cmake --build . -j {$this->library->getBuilder()->concurrency} --verbose");
 
         // install
         $this->steps >= 3 && $this->shell->exec('make install');
