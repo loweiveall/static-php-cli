@@ -789,10 +789,9 @@
         }
     },
     "mosquitto": {
-        "type": "url",
-        "url": "https://pecl.php.net/get/mosquitto",
-        "path": "php-src/ext/mosquitto",
-        "filename": "mosquitto.tgz",
+        "type": "git",
+        "url": "https://github.com/mgdm/Mosquitto-PHP.git",
+        "rev": "php8",
         "license": {
             "type": "file",
             "path": "LICENSE"
