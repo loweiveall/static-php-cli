@@ -614,6 +614,7 @@
     "libmosquitto": {
         "type": "url",
         "url": "https://github.com/eclipse-mosquitto/mosquitto/archive/refs/tags/v2.0.15.tar.gz",
+        "provide-pre-built": true,
         "license": {
             "type": "file",
             "path": "LICENSE.txt"
