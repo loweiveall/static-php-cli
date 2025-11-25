@@ -793,7 +793,7 @@
         "type": "git",
         "url": "https://github.com/mgdm/Mosquitto-PHP.git",
         "rev": "php8",
-        "path": "php-src/ext/mosquitto",
+        "provide-pre-built": true,
         "license": {
             "type": "file",
             "path": "LICENSE"
