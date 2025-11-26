@@ -26,7 +26,7 @@ class mosquitto extends Extension
 
     public function getUnixConfigureArg(bool $shared = false): string
     {
-        return '--with-mosquitto=' . ($shared ? 'shared,' : '') . BUILD_ROOT_PATH;
+        return '--enable-mosquitto' . ($shared ? '=shared,' : '');
     }
 
     public function getWindowsConfigureArg($shared = false): string
