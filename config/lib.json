@@ -480,8 +480,7 @@
             "mosquitto.lib"
         ],
         "lib-depends": [
-            "openssl",
-            "cjson"
+            "openssl"
         ]
     },
     "libpng": {
