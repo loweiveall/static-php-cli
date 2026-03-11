@@ -612,9 +612,9 @@
         }
     },
     "libmosquitto": {
-        "type": "url",
-        "url": "https://github.com/eclipse-mosquitto/mosquitto/archive/refs/tags/v2.0.15.tar.gz",
-        "provide-pre-built": true,
+        "type": "git",
+        "url": "https://github.com/eclipse/mosquitto.git",
+        "rev": "master",
         "license": {
             "type": "file",
             "path": "LICENSE.txt"
@@ -790,10 +790,10 @@
         }
     },
     "mosquitto": {
-        "type": "git",
-        "url": "https://github.com/mgdm/Mosquitto-PHP.git",
-        "rev": "php8",
-        "provide-pre-built": true,
+        "type": "url",
+        "url": "https://pecl.php.net/get/mosquitto",
+        "path": "php-src/ext/mosquitto",
+        "filename": "mosquitto.tgz",
         "license": {
             "type": "file",
             "path": "LICENSE"

@@ -474,17 +474,14 @@
     "libmosquitto": {
         "source": "libmosquitto",
         "static-libs-unix": [
-            "libmosquitto_static.a",
-            "libmosquittopp_static.a"
+            "libmosquitto.a"
         ],
         "static-libs-windows": [
-            "mosquitto.4.lib"
+            "mosquitto.lib"
         ],
         "lib-depends": [
             "openssl",
-            "libcares",
-            "libxslt",
-            "zlib"
+            "cjson"
         ]
     },
     "libpng": {

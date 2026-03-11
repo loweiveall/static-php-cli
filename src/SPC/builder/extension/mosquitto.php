@@ -14,19 +14,31 @@ class mosquitto extends Extension
     public function patchBeforeMake(): bool
     {
         $patched = parent::patchBeforeMake();
-//        if (PHP_OS_FAMILY === 'Windows') {
-//            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\amqp.h', '/^#warning.*/m', '');
-//            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\amqp_framing.h', '/^#warning.*/m', '');
-//            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\amqp_ssl_socket.h', '/^#warning.*/m', '');
-//            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\amqp_tcp_socket.h', '/^#warning.*/m', '');
-//            return true;
-//        }
+
+        // Windows 平台的特殊处理
+        if (PHP_OS_FAMILY === 'Windows') {
+            // 修复可能的编译警告
+            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\php_mosquitto.h', '/^#warning.*/m', '');
+            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\mosquitto_private.h', '/^#warning.*/m', '');
+            return true;
+        }
+
+        // Unix/Linux 平台可能需要的预处理
+        // 确保头文件路径正确
+        if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto.h')) {
+            copy(
+                BUILD_ROOT_PATH . '/include/mosquitto.h',
+                BUILD_INCLUDE_PATH . '/mosquitto.h'
+            );
+        }
+
         return $patched;
     }
 
     public function getUnixConfigureArg(bool $shared = false): string
     {
-        return '--enable-mosquitto' . ($shared ? '=shared,' : '');
+        return '--with-mosquitto' . ($shared ? '=shared' : '') .
+            ' --with-libmosquitto-dir=' . BUILD_ROOT_PATH;
     }
 
     public function getWindowsConfigureArg($shared = false): string
