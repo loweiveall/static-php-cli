@@ -799,6 +799,15 @@
             "path": "LICENSE"
         }
     },
+    "cjson": {
+        "type": "git",
+        "url": "https://github.com/DaveGamble/cJSON.git",
+        "rev": "master",
+        "license": {
+            "type": "file",
+            "path": "LICENSE"
+        }
+    },
     "msgpack": {
         "type": "url",
         "url": "https://pecl.php.net/get/msgpack",
