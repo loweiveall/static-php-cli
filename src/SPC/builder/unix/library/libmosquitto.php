@@ -15,27 +15,32 @@ trait libmosquitto
             mkdir($this->source_dir . '/build', 0755, true);
         }
 
+        // 首先尝试直接修改 CMakeLists.txt 禁用插件
+        $this->patchCMakeForPlugin();
+
         // 进入构建目录
         shell()->cd($this->source_dir . '/build')
             ->exec('rm -rf *')
             ->exec("{$this->builder->getOption('configure_env')} cmake .. \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DWITH_STATIC_LIBRARIES=ON \
-                -DWITH_SHARED_LIBRARIES=OFF \
-                -DWITH_TLS=ON \
-                -DWITH_WEBSOCKETS=OFF \
-                -DWITH_SRV=OFF \
-                -DDOCUMENTATION=OFF \
-                -DWITH_DOCS=OFF \
-                -DWITH_CJSON=ON \
-                -DWITH_STRIP=OFF \
-                -DWITH_BROKER=OFF \                 # 禁用 broker 编译
-                -DWITH_CLIENTS=OFF \                 # 禁用客户端工具
-                -DWITH_PLUGINS=OFF \                  # 禁用插件
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-            ->exec("make -j{$this->builder->concurrency}")
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_STATIC_LIBRARIES=ON \
+            -DWITH_SHARED_LIBRARIES=OFF \
+            -DWITH_TLS=ON \
+            -DWITH_WEBSOCKETS=OFF \
+            -DWITH_SRV=OFF \
+            -DDOCUMENTATION=OFF \
+            -DWITH_DOCS=OFF \
+            -DWITH_CJSON=ON \
+            -DWITH_STRIP=OFF \
+            -DWITH_BROKER=OFF \
+            -DWITH_CLIENTS=OFF \
+            -DWITH_PLUGINS=OFF \
+            -DWITH_APPS=OFF \
+            -DWITH_PERSISTENCE=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+            ->exec("make -j{$this->builder->concurrency} libmosquitto")
             ->exec('make install');
 
         // 复制头文件
@@ -43,6 +48,27 @@ trait libmosquitto
 
         // 生成 pkg-config 文件
         $this->patchPkgconf();
+    }
+
+    /**
+     * 手动修改 CMakeLists.txt 禁用插件
+     */
+    protected function patchCMakeForPlugin(): void
+    {
+        $cmake_file = $this->source_dir . '/CMakeLists.txt';
+        if (file_exists($cmake_file)) {
+            $content = file_get_contents($cmake_file);
+            // 注释掉 plugins 子目录的添加
+            $content = preg_replace('/add_subdirectory\(plugins\)/', '# add_subdirectory(plugins)', $content);
+            file_put_contents($cmake_file, $content);
+        }
+
+        // 如果 plugins/CMakeLists.txt 存在，也修改它
+        $plugins_cmake = $this->source_dir . '/plugins/CMakeLists.txt';
+        if (file_exists($plugins_cmake)) {
+            // 重命名或删除，阻止编译
+            rename($plugins_cmake, $plugins_cmake . '.bak');
+        }
     }
 
     protected function copyHeaderFiles(): void
