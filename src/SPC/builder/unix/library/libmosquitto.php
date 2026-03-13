@@ -4,24 +4,20 @@ declare(strict_types=1);
 
 namespace SPC\builder\unix\library;
 
-use SPC\util\executor\MosquittoCMakeExecutor;
+use SPC\store\FileSystem;
 
 trait libmosquitto
 {
     protected function build(): void
     {
-        // 强制禁用测试（直接修改 CMakeLists.txt）
-        $this->forceDisableTests();
+        // 1. 首先确保 cJSON 头文件存在
+        $this->ensureCjsonHeaders();
 
-        // 创建 cjson 头文件的正确目录结构
-        if (!is_dir(BUILD_INCLUDE_PATH . '/cjson')) {
-            mkdir(BUILD_INCLUDE_PATH . '/cjson', 0755, true);
-        }
+        // 2. 直接修改源码中的 include 语句
+        $this->fixCjsonIncludes();
 
-        // 创建符号链接，让 <cjson/cJSON.h> 能找到
-        if (file_exists(BUILD_INCLUDE_PATH . '/cJSON.h')) {
-            shell()->exec("ln -sf " . BUILD_INCLUDE_PATH . "/cJSON.h " . BUILD_INCLUDE_PATH . "/cjson/cJSON.h");
-        }
+        // 3. 禁用 C++ 库（不需要）
+        $this->disableCppLib();
 
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
@@ -51,8 +47,9 @@ trait libmosquitto
                 -DWITH_BRIDGE=OFF \
                 -DWITH_SYS_TREE=OFF \
                 -DWITH_APPS=OFF \
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-            ->exec("make -j{$this->builder->concurrency} mosquitto_static || make -j{$this->builder->concurrency}")
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+                -DWITH_CPP=OFF")  // 新增：禁用 C++ 库
+            ->exec("make -j{$this->builder->concurrency}")
             ->exec('make install');
 
         // 复制头文件
@@ -63,61 +60,94 @@ trait libmosquitto
     }
 
     /**
-     * 强制禁用测试 - 直接修改 CMakeLists.txt
+     * 确保 cJSON 头文件存在
      */
-    protected function forceDisableTests(): void
+    protected function ensureCjsonHeaders(): void
+    {
+        // 检查 cJSON 头文件是否在 buildroot 中
+        if (!file_exists(BUILD_INCLUDE_PATH . '/cJSON.h')) {
+            // 尝试从其他位置查找
+            $possible_paths = [
+                '/usr/local/include/cJSON.h',
+                '/usr/include/cJSON.h',
+                $this->builder->getOption('work_dir') . '/buildroot/include/cJSON.h',
+                dirname($this->source_dir) . '/cjson/cJSON.h'
+            ];
+
+            foreach ($possible_paths as $path) {
+                if (file_exists($path)) {
+                    copy($path, BUILD_INCLUDE_PATH . '/cJSON.h');
+                    echo "[I] Found cJSON.h at {$path}\n";
+                    break;
+                }
+            }
+        }
+
+        // 如果仍然不存在，报错
+        if (!file_exists(BUILD_INCLUDE_PATH . '/cJSON.h')) {
+            throw new \RuntimeException('cJSON.h not found! Please ensure cjson is built first.');
+        }
+    }
+
+    /**
+     * 修复 cJSON 头文件引用
+     * 将所有 #include <cjson/cJSON.h> 改为 #include <cJSON.h>
+     */
+    protected function fixCjsonIncludes(): void
+    {
+        echo "[I] Fixing cJSON includes in mosquitto source...\n";
+
+        // 查找所有需要修改的文件
+        $files_to_fix = [
+            $this->source_dir . '/include/mosquitto/libcommon_cjson.h',
+            $this->source_dir . '/libcommon/cjson_common.c',
+            $this->source_dir . '/lib/cpp/mosquittopp.cpp',
+            $this->source_dir . '/lib/cpp/mosquittopp.h',
+            $this->source_dir . '/lib/mosquitto.c',
+        ];
+
+        foreach ($files_to_fix as $file) {
+            if (file_exists($file)) {
+                $content = file_get_contents($file);
+                $original = $content;
+
+                // 替换 include 语句
+                $content = str_replace(
+                    ['#include <cjson/cJSON.h>', '#include "cjson/cJSON.h"'],
+                    ['#include <cJSON.h>', '#include "cJSON.h"'],
+                    $content
+                );
+
+                if ($content !== $original) {
+                    file_put_contents($file, $content);
+                    echo "[I] Fixed includes in: {$file}\n";
+                }
+            }
+        }
+
+        // 使用 find 命令搜索并替换所有文件
+        shell()->cd($this->source_dir)
+            ->exec("find . -name '*.c' -o -name '*.h' -o -name '*.cpp' | xargs sed -i 's/#include <cjson\\/cJSON.h>/#include <cJSON.h>/g' 2>/dev/null || true")
+            ->exec("find . -name '*.c' -o -name '*.h' -o -name '*.cpp' | xargs sed -i 's/#include \"cjson\\/cJSON.h\"/#include \"cJSON.h\"/g' 2>/dev/null || true");
+    }
+
+    /**
+     * 禁用 C++ 库编译
+     */
+    protected function disableCppLib(): void
     {
         $cmake_file = $this->source_dir . '/CMakeLists.txt';
         if (file_exists($cmake_file)) {
             $content = file_get_contents($cmake_file);
-
-            // 1. 注释掉 find_package(GTest ...) 行
-            $content = preg_replace('/find_package\s*\(\s*GTest.*?\)/m', '# $0', $content);
-
-            // 2. 注释掉 enable_testing() 行
-            $content = preg_replace('/enable_testing\s*\(\)/m', '# $0', $content);
-
-            // 3. 注释掉 add_subdirectory(test) 行
-            $content = preg_replace('/add_subdirectory\s*\(\s*test\s*\)/m', '# $0', $content);
-
-            // 4. 查找并注释掉任何包含 "test" 或 "gtest" 的条件块
-            $lines = explode("\n", $content);
-            $in_test_block = false;
-            $new_lines = [];
-
-            foreach ($lines as $line) {
-                // 如果进入测试相关的 if 块
-                if (preg_match('/if\s*\(\s*WITH_TESTING\s*\)/i', $line) ||
-                    preg_match('/if\s*\(\s*WITH_UNIT_TESTS\s*\)/i', $line)) {
-                    $in_test_block = true;
-                    $new_lines[] = '# ' . $line;  // 注释掉 if 行
-                    continue;
-                }
-
-                // 如果在测试块内
-                if ($in_test_block) {
-                    $new_lines[] = '# ' . $line;  // 注释掉块内所有行
-                    if (preg_match('/endif\s*\(.*\)/i', $line)) {
-                        $in_test_block = false;  // 结束测试块
-                    }
-                    continue;
-                }
-
-                // 正常行
-                $new_lines[] = $line;
-            }
-
-            $content = implode("\n", $new_lines);
+            // 注释掉 C++ 子目录
+            $content = preg_replace('/add_subdirectory\(lib\/cpp\)/', '# add_subdirectory(lib/cpp)', $content);
             file_put_contents($cmake_file, $content);
-
-            echo "[I] Modified CMakeLists.txt to disable tests\n";
         }
 
-        // 如果存在 test 目录，直接重命名
-        $test_dir = $this->source_dir . '/test';
-        if (is_dir($test_dir)) {
-            rename($test_dir, $test_dir . '.disabled');
-            echo "[I] Disabled test directory\n";
+        // 重命名 cpp 目录
+        $cpp_dir = $this->source_dir . '/lib/cpp';
+        if (is_dir($cpp_dir)) {
+            rename($cpp_dir, $cpp_dir . '.disabled');
         }
     }
 
@@ -131,33 +161,13 @@ trait libmosquitto
         // 从源码目录复制头文件
         $source_include = $this->source_dir . '/include';
         if (is_dir($source_include)) {
-            \SPC\store\FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
-        }
-
-        // 从构建产物目录复制
-        $build_include = $this->source_dir . '/build/lib/include';
-        if (is_dir($build_include)) {
-            \SPC\store\FileSystem::copyDir($build_include, BUILD_INCLUDE_PATH);
+            FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
         }
 
         // 从安装目录复制
         $install_include = $this->builder->getOption('work_dir') . '/buildroot/include';
         if (is_dir($install_include)) {
-            \SPC\store\FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
-        }
-
-        // 确保关键头文件存在
-        $key_headers = ['mosquitto.h', 'mqtt_protocol.h'];
-        foreach ($key_headers as $header) {
-            if (!file_exists(BUILD_INCLUDE_PATH . '/' . $header)) {
-                $find_result = shell()->exec("find {$this->source_dir} -name '{$header}' -type f")->getOutput();
-                if (!empty($find_result)) {
-                    $header_file = trim(explode("\n", $find_result)[0]);
-                    if (file_exists($header_file)) {
-                        copy($header_file, BUILD_INCLUDE_PATH . '/' . $header);
-                    }
-                }
-            }
+            FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
         }
     }
 
