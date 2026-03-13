@@ -4,24 +4,53 @@ declare(strict_types=1);
 
 namespace SPC\builder\unix\library;
 
+use SPC\store\FileSystem;
 use SPC\util\executor\UnixCMakeExecutor;
 
 trait libmosquitto
 {
     protected function build(): void
     {
-        // 进入构建目录
-        UnixCMakeExecutor::create($this)
-            ->addConfigureArgs(
-                '-DWITH_STATIC_LIBRARIES=ON',
-                '-DWITH_SHARED_LIBRARIES=OFF',
-                '-DWITH_TLS=OFF',
-                '-DWITH_WEBSOCKETS=OFF',
-                '-DWITH_SRV=OFF',
-                '-DDOCUMENTATION=OFF',
-                '-DWITH_DOCS=OFF'
-            )->build();
+        // 创建构建目录
+        if (!is_dir($this->source_dir . '/build')) {
+            mkdir($this->source_dir . '/build', 0755, true);
+        }
 
+        // 首先手动修改 CMakeLists.txt，强制禁用插件目录
+        $this->disablePlugins();
+
+        // 进入构建目录
+        shell()->cd($this->source_dir . '/build')
+            ->exec('rm -rf *')
+            ->exec("{$this->builder->getOption('configure_env')} cmake .. \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_STATIC_LIBRARIES=ON \
+            -DWITH_SHARED_LIBRARIES=OFF \
+            -DWITH_TLS=ON \
+            -DWITH_WEBSOCKETS=OFF \
+            -DWITH_SRV=OFF \
+            -DDOCUMENTATION=OFF \
+            -DWITH_DOCS=OFF \
+            -DWITH_CJSON=ON \
+            -DWITH_STRIP=OFF \
+            -DWITH_BROKER=OFF \
+            -DWITH_CLIENTS=OFF \
+            -DWITH_PLUGINS=OFF \
+            -DWITH_PERSISTENCE=OFF \
+            -DWITH_BRIDGE=OFF \
+            -DWITH_SYS_TREE=OFF \
+            -DWITH_APPS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+            ->exec("make -j{$this->builder->concurrency} mosquitto_static || make -j{$this->builder->concurrency}")
+            ->exec('make install');
+
+        // 复制头文件
+        $this->copyHeaderFiles();
+
+        // 生成 pkg-config 文件
+        $this->patchPkgconf();
     }
 
     /**
