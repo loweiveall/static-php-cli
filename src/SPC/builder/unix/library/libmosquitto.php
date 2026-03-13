@@ -10,43 +10,15 @@ trait libmosquitto
 {
     protected function build(): void
     {
-        // 创建构建目录
-        if (!is_dir($this->source_dir . '/build')) {
-            mkdir($this->source_dir . '/build', 0755, true);
-        }
+        // 直接使用 make 只编译 libmosquitto
+        shell()->cd($this->source_dir)
+            ->exec('make clean')
+            ->exec("make WITH_TLS=yes WITH_CJSON=yes libmosquitto.a")
+            ->exec('cp libmosquitto.a ' . BUILD_LIB_PATH . '/')
+            ->exec('cp include/mosquitto.h ' . BUILD_INCLUDE_PATH . '/')
+            ->exec('cp include/mosquitto_broker.h ' . BUILD_INCLUDE_PATH . '/ 2>/dev/null || true')
+            ->exec('cp include/mqtt_protocol.h ' . BUILD_INCLUDE_PATH . '/ 2>/dev/null || true');
 
-        // 首先尝试直接修改 CMakeLists.txt 禁用插件
-        $this->patchCMakeForPlugin();
-
-        // 进入构建目录
-        shell()->cd($this->source_dir . '/build')
-            ->exec('rm -rf *')
-            ->exec("{$this->builder->getOption('configure_env')} cmake .. \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_STATIC_LIBRARIES=ON \
-            -DWITH_SHARED_LIBRARIES=OFF \
-            -DWITH_TLS=ON \
-            -DWITH_WEBSOCKETS=OFF \
-            -DWITH_SRV=OFF \
-            -DDOCUMENTATION=OFF \
-            -DWITH_DOCS=OFF \
-            -DWITH_CJSON=ON \
-            -DWITH_STRIP=OFF \
-            -DWITH_BROKER=OFF \
-            -DWITH_CLIENTS=OFF \
-            -DWITH_PLUGINS=OFF \
-            -DWITH_APPS=OFF \
-            -DWITH_PERSISTENCE=OFF \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-            ->exec("make -j{$this->builder->concurrency} libmosquitto")
-            ->exec('make install');
-
-        // 复制头文件
-        $this->copyHeaderFiles();
-
-        // 生成 pkg-config 文件
         $this->patchPkgconf();
     }
 
