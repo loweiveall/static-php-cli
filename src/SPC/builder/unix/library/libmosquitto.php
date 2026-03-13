@@ -13,6 +13,16 @@ trait libmosquitto
         // 强制禁用测试（直接修改 CMakeLists.txt）
         $this->forceDisableTests();
 
+        // 创建 cjson 头文件的正确目录结构
+        if (!is_dir(BUILD_INCLUDE_PATH . '/cjson')) {
+            mkdir(BUILD_INCLUDE_PATH . '/cjson', 0755, true);
+        }
+
+        // 创建符号链接，让 <cjson/cJSON.h> 能找到
+        if (file_exists(BUILD_INCLUDE_PATH . '/cJSON.h')) {
+            shell()->exec("ln -sf " . BUILD_INCLUDE_PATH . "/cJSON.h " . BUILD_INCLUDE_PATH . "/cjson/cJSON.h");
+        }
+
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
             mkdir($this->source_dir . '/build', 0755, true);
