@@ -4,45 +4,58 @@ declare(strict_types=1);
 
 namespace SPC\builder\unix\library;
 
-use SPC\store\FileSystem;
+use SPC\util\executor\UnixCMakeExecutor;
 
 trait libmosquitto
 {
     protected function build(): void
     {
-        // 直接使用 make 只编译 libmosquitto
-        shell()->cd($this->source_dir)
-            ->exec('make clean')
-            ->exec("make WITH_TLS=yes WITH_CJSON=yes libmosquitto.a")
-            ->exec('cp libmosquitto.a ' . BUILD_LIB_PATH . '/')
-            ->exec('cp include/mosquitto.h ' . BUILD_INCLUDE_PATH . '/')
-            ->exec('cp include/mosquitto_broker.h ' . BUILD_INCLUDE_PATH . '/ 2>/dev/null || true')
-            ->exec('cp include/mqtt_protocol.h ' . BUILD_INCLUDE_PATH . '/ 2>/dev/null || true');
+        // 进入构建目录
+        UnixCMakeExecutor::create($this)
+            ->addConfigureArgs(
+                '-DWITH_STATIC_LIBRARIES=ON',
+                '-DWITH_SHARED_LIBRARIES=OFF',
+                '-DWITH_TLS=OFF',
+                '-DWITH_WEBSOCKETS=OFF',
+                '-DWITH_SRV=OFF',
+                '-DDOCUMENTATION=OFF',
+                '-DWITH_DOCS=OFF'
+            )->build();
 
-        $this->patchPkgconf();
     }
 
     /**
-     * 手动修改 CMakeLists.txt 禁用插件
+     * 手动禁用插件和任何可能引入 SQLite3 的组件
      */
-    protected function patchCMakeForPlugin(): void
+    protected function disablePlugins(): void
     {
-        $cmake_file = $this->source_dir . '/CMakeLists.txt';
-        if (file_exists($cmake_file)) {
-            $content = file_get_contents($cmake_file);
-            // 注释掉 plugins 子目录的添加
-            $content = preg_replace('/add_subdirectory\(plugins\)/', '# add_subdirectory(plugins)', $content);
-            file_put_contents($cmake_file, $content);
-        }
-
-        // 如果 plugins/CMakeLists.txt 存在，也修改它
+        // 禁用 plugins/CMakeLists.txt
         $plugins_cmake = $this->source_dir . '/plugins/CMakeLists.txt';
         if (file_exists($plugins_cmake)) {
-            // 重命名或删除，阻止编译
-            rename($plugins_cmake, $plugins_cmake . '.bak');
+            rename($plugins_cmake, $plugins_cmake . '.disabled');
+        }
+
+        // 修改根 CMakeLists.txt，注释掉插件子目录
+        $root_cmake = $this->source_dir . '/CMakeLists.txt';
+        if (file_exists($root_cmake)) {
+            $content = file_get_contents($root_cmake);
+            // 注释掉 plugins 子目录的添加
+            $content = preg_replace('/add_subdirectory\(plugins\)/', '# add_subdirectory(plugins)', $content);
+            // 也禁用其他可能引入 SQLite3 的组件
+            $content = preg_replace('/add_subdirectory\(apps\)/', '# add_subdirectory(apps)', $content);
+            file_put_contents($root_cmake, $content);
+        }
+
+        // 如果存在 dynamic-security 插件目录，直接重命名
+        $dynamic_security = $this->source_dir . '/plugins/dynamic-security';
+        if (is_dir($dynamic_security)) {
+            rename($dynamic_security, $dynamic_security . '.disabled');
         }
     }
 
+    /**
+     * 复制头文件到正确位置
+     */
     protected function copyHeaderFiles(): void
     {
         // 确保 include 目录存在
@@ -53,19 +66,27 @@ trait libmosquitto
         // 从源码目录复制头文件
         $source_include = $this->source_dir . '/include';
         if (is_dir($source_include)) {
-            FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
-        }
-
-        // 从构建产物目录复制（某些版本可能安装到这里）
-        $build_include = $this->source_dir . '/build/lib/include';
-        if (is_dir($build_include)) {
-            FileSystem::copyDir($build_include, BUILD_INCLUDE_PATH);
+            \SPC\store\FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
         }
 
         // 从安装目录复制
         $install_include = $this->builder->getOption('work_dir') . '/buildroot/include';
         if (is_dir($install_include)) {
-            FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
+            \SPC\store\FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
+        }
+
+        // 确保关键头文件存在
+        $key_headers = ['mosquitto.h', 'mqtt_protocol.h'];
+        foreach ($key_headers as $header) {
+            if (!file_exists(BUILD_INCLUDE_PATH . '/' . $header)) {
+                $find_result = shell()->exec("find {$this->source_dir} -name '{$header}' -type f")->getOutput();
+                if (!empty($find_result)) {
+                    $header_file = trim(explode("\n", $find_result)[0]);
+                    if (file_exists($header_file)) {
+                        copy($header_file, BUILD_INCLUDE_PATH . '/' . $header);
+                    }
+                }
+            }
         }
     }
 
