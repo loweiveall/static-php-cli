@@ -16,8 +16,11 @@ trait libmosquitto
         // 2. 修复cJSON包含路径
         $this->fixCjsonIncludes();
 
-        // 3. 彻底修改CMakeLists.txt
+        // 3. 精确修改CMakeLists.txt
         $this->patchCMakeLists();
+
+        // 4. 特别修改 lib/CMakeLists.txt
+        $this->patchLibCMakeLists();
 
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
@@ -59,7 +62,41 @@ trait libmosquitto
     }
 
     /**
-     * 彻底修改CMakeLists.txt，移除所有问题组件
+     * 精确修改 lib/CMakeLists.txt
+     */
+    protected function patchLibCMakeLists(): void
+    {
+        $lib_cmake = $this->source_dir . '/lib/CMakeLists.txt';
+        if (file_exists($lib_cmake)) {
+            $content = file_get_contents($lib_cmake);
+            $original = $content;
+
+            // 注释掉第2行的 add_subdirectory(cpp)
+            $lines = explode("\n", $content);
+            if (isset($lines[1]) && strpos($lines[1], 'add_subdirectory(cpp)') !== false) {
+                $lines[1] = '# ' . $lines[1];
+                $content = implode("\n", $lines);
+            } else {
+                // 如果不在第2行，就全局替换
+                $content = str_replace('add_subdirectory(cpp)', '# add_subdirectory(cpp)', $content);
+            }
+
+            if ($content !== $original) {
+                file_put_contents($lib_cmake, $content);
+                echo "[I] Patched lib/CMakeLists.txt\n";
+            }
+        }
+
+        // 确保cpp目录不存在
+        $cpp_dir = $this->source_dir . '/lib/cpp';
+        if (is_dir($cpp_dir)) {
+            rename($cpp_dir, $cpp_dir . '.disabled');
+            echo "[I] Disabled cpp directory\n";
+        }
+    }
+
+    /**
+     * 修改主CMakeLists.txt
      */
     protected function patchCMakeLists(): void
     {
@@ -71,33 +108,24 @@ trait libmosquitto
         $content = file_get_contents($cmake_file);
         $original = $content;
 
-        // 1. 注释掉cpp目录引用
-        $content = preg_replace('/add_subdirectory\s*\(\s*lib\/cpp\s*\)/', '# add_subdirectory(lib/cpp)', $content);
-
-        // 2. 注释掉GTest查找
+        // 注释掉GTest查找
         $content = preg_replace('/find_package\s*\(\s*GTest.*?\)/s', '# $0', $content);
 
-        // 3. 注释掉测试相关块
+        // 注释掉测试相关块
         $content = preg_replace('/if\s*\(\s*WITH_TESTING.*?endif\s*\(\)/s', '# $0', $content);
 
-        // 4. 注释掉enable_testing
+        // 注释掉enable_testing
         $content = str_replace('enable_testing()', '# enable_testing()', $content);
 
-        // 5. 注释掉test子目录
+        // 注释掉test子目录
         $content = preg_replace('/add_subdirectory\s*\(\s*test\s*\)/', '# add_subdirectory(test)', $content);
 
         if ($content !== $original) {
             file_put_contents($cmake_file, $content);
-            echo "[I] Patched CMakeLists.txt\n";
+            echo "[I] Patched main CMakeLists.txt\n";
         }
 
-        // 6. 重命名问题目录
-        $cpp_dir = $this->source_dir . '/lib/cpp';
-        if (is_dir($cpp_dir)) {
-            rename($cpp_dir, $cpp_dir . '.disabled');
-            echo "[I] Disabled cpp directory\n";
-        }
-
+        // 重命名test目录
         $test_dir = $this->source_dir . '/test';
         if (is_dir($test_dir)) {
             rename($test_dir, $test_dir . '.disabled');
@@ -113,6 +141,9 @@ trait libmosquitto
         // 从cjson源码目录复制头文件
         $cjson_source = dirname($this->source_dir) . '/cjson';
         if (file_exists($cjson_source . '/cJSON.h')) {
+            if (!is_dir(BUILD_INCLUDE_PATH)) {
+                mkdir(BUILD_INCLUDE_PATH, 0755, true);
+            }
             copy($cjson_source . '/cJSON.h', BUILD_INCLUDE_PATH . '/cJSON.h');
             echo "[I] Copied cJSON.h from cjson source\n";
         }
