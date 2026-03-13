@@ -18,9 +18,9 @@ trait libmosquitto
         // 进入构建目录
         shell()->cd($this->source_dir . '/build')
             ->exec('rm -rf *')
-            ->exec("{$this->builder->configure_env} cmake .. \
+            ->exec("{$this->builder->getOption('configure_env')} cmake .. \
                 -DBUILD_SHARED_LIBS=OFF \
-                -DCMAKE_INSTALL_PREFIX={$this->builder->work_dir}/buildroot \
+                -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DWITH_STATIC_LIBRARIES=ON \
                 -DWITH_SHARED_LIBRARIES=OFF \
@@ -29,59 +29,53 @@ trait libmosquitto
                 -DWITH_SRV=OFF \
                 -DDOCUMENTATION=OFF \
                 -DWITH_DOCS=OFF \
-                -DPOSITION_INDEPENDENT_CODE=ON \
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
                 -DWITH_CJSON=ON \
-                -DWITH_STRIP=OFF")
+                -DWITH_STRIP=OFF \
+                -DWITH_BROKER=OFF \                 # 禁用 broker 编译
+                -DWITH_CLIENTS=OFF \                 # 禁用客户端工具
+                -DWITH_PLUGINS=OFF \                  # 禁用插件
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
             ->exec("make -j{$this->builder->concurrency}")
             ->exec('make install');
 
-        // 复制头文件到正确位置（确保所有头文件都在 include 目录下）
+        // 复制头文件
         $this->copyHeaderFiles();
 
         // 生成 pkg-config 文件
         $this->patchPkgconf();
     }
 
-    /**
-     * 复制头文件到正确位置
-     */
     protected function copyHeaderFiles(): void
     {
-        // 检查头文件是否已经通过 make install 安装
-        if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto.h')) {
-            // 尝试从源码目录复制
-            $source_include = $this->source_dir . '/include';
-            if (is_dir($source_include)) {
-                FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
-            }
-
-            // 尝试从构建目录复制
-            $build_include = $this->source_dir . '/build/lib/include';
-            if (is_dir($build_include) && !file_exists(BUILD_INCLUDE_PATH . '/mosquitto.h')) {
-                FileSystem::copyDir($build_include, BUILD_INCLUDE_PATH);
-            }
+        // 确保 include 目录存在
+        if (!is_dir(BUILD_INCLUDE_PATH)) {
+            mkdir(BUILD_INCLUDE_PATH, 0755, true);
         }
 
-        // 确保 mosquitto.h 存在
-        if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto.h')) {
-            // 如果还是没有，尝试查找并复制
-            $find_result = shell()->exec("find {$this->source_dir} -name 'mosquitto.h' -type f")->getOutput();
-            if (!empty($find_result)) {
-                $header_file = trim(explode("\n", $find_result)[0]);
-                if (file_exists($header_file)) {
-                    copy($header_file, BUILD_INCLUDE_PATH . '/mosquitto.h');
-                }
-            }
+        // 从源码目录复制头文件
+        $source_include = $this->source_dir . '/include';
+        if (is_dir($source_include)) {
+            FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
+        }
+
+        // 从构建产物目录复制（某些版本可能安装到这里）
+        $build_include = $this->source_dir . '/build/lib/include';
+        if (is_dir($build_include)) {
+            FileSystem::copyDir($build_include, BUILD_INCLUDE_PATH);
+        }
+
+        // 从安装目录复制
+        $install_include = $this->builder->getOption('work_dir') . '/buildroot/include';
+        if (is_dir($install_include)) {
+            FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
         }
     }
 
     protected function patchPkgconf(): void
     {
         // 获取版本号
-        $version = '2.0.18'; // 默认版本
+        $version = '2.0.18';
 
-        // 尝试从源码中获取版本号
         if (file_exists($this->source_dir . '/CMakeLists.txt')) {
             $cmake_content = file_get_contents($this->source_dir . '/CMakeLists.txt');
             if (preg_match('/set\s*\(\s*VERSION\s+([0-9.]+)\s*\)/i', $cmake_content, $matches)) {
@@ -89,9 +83,8 @@ trait libmosquitto
             }
         }
 
-        // 生成 pkg-config 文件
         $pc_content = <<<EOF
-prefix={$this->builder->work_dir}/buildroot
+prefix={$this->builder->getOption('work_dir')}/buildroot
 exec_prefix=\${prefix}
 libdir=\${exec_prefix}/lib
 includedir=\${prefix}/include
@@ -105,7 +98,6 @@ Requires.private: openssl cjson
 
 EOF;
 
-        // 确保 pkgconfig 目录存在
         if (!is_dir(BUILD_LIB_PATH . '/pkgconfig')) {
             mkdir(BUILD_LIB_PATH . '/pkgconfig', 0755, true);
         }
