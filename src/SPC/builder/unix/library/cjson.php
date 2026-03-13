@@ -24,11 +24,8 @@ trait cjson
                 -DCMAKE_BUILD_TYPE=Release \
                 -DENABLE_CJSON_TEST=OFF \
                 -DENABLE_CJSON_UTILS=OFF \
-                -DBUILD_SHARED_AND_STATIC_LIBS=OFF \
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-                -DCJSON_BUILD_SHARED_LIBS=OFF \
-                -DCJSON_OVERRIDE_BUILD_SHARED_LIBS=OFF")
-            ->exec("make -j{$this->builder->concurrency} cjson-static")
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+            ->exec("make -j{$this->builder->concurrency}")
             ->exec('make install');
 
         // 确保静态库被正确复制
@@ -44,32 +41,71 @@ trait cjson
     protected function ensureStaticLib(): void
     {
         $work_dir = $this->builder->getOption('work_dir');
-        $source_lib = $this->source_dir . '/build/libcjson.a';
         $target_lib = BUILD_LIB_PATH . '/libcjson.a';
 
-        // 如果 cmake install 没有复制库，手动复制
+        // 如果 make install 没有复制库，手动查找并复制
         if (!file_exists($target_lib)) {
-            if (file_exists($source_lib)) {
-                copy($source_lib, $target_lib);
-                echo "[I] Manually copied libcjson.a\n";
-            } else {
-                // 尝试查找编译出的库
-                $find_result = shell()->cd($this->source_dir)->exec("find . -name 'libcjson.a' -type f")->getOutput();
-                if (!empty($find_result)) {
-                    $lib_file = trim(explode("\n", $find_result)[0]);
+            // 在构建目录中查找
+            $possible_libs = [
+                $this->source_dir . '/build/libcjson.a',
+                $this->source_dir . '/build/lib/libcjson.a',
+                $this->source_dir . '/libcjson.a',
+            ];
+
+            $found = false;
+            foreach ($possible_libs as $lib) {
+                if (file_exists($lib)) {
+                    copy($lib, $target_lib);
+                    echo "[I] Copied cJSON static lib from {$lib}\n";
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                // 使用 find 命令搜索
+                $result = shell()->cd($this->source_dir)
+                    ->exec("find . -name 'libcjson.a' -type f | head -1")
+                    ->getOutput();
+                $lib_file = trim($result);
+                if (!empty($lib_file)) {
                     copy($lib_file, $target_lib);
-                    echo "[I] Found and copied libcjson.a from {$lib_file}\n";
+                    echo "[I] Found and copied cJSON static lib from {$lib_file}\n";
                 } else {
-                    throw new \RuntimeException('libcjson.a not found!');
+                    throw new \RuntimeException('libcjson.a not found after build!');
                 }
             }
         }
 
         // 确保头文件存在
         if (!file_exists(BUILD_INCLUDE_PATH . '/cJSON.h')) {
-            $source_header = $this->source_dir . '/cJSON.h';
-            if (file_exists($source_header)) {
-                copy($source_header, BUILD_INCLUDE_PATH . '/cJSON.h');
+            $possible_headers = [
+                $this->source_dir . '/cJSON.h',
+                $this->source_dir . '/build/cJSON.h',
+                $this->source_dir . '/include/cJSON.h',
+            ];
+
+            $found = false;
+            foreach ($possible_headers as $header) {
+                if (file_exists($header)) {
+                    copy($header, BUILD_INCLUDE_PATH . '/cJSON.h');
+                    echo "[I] Copied cJSON header from {$header}\n";
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                $result = shell()->cd($this->source_dir)
+                    ->exec("find . -name 'cJSON.h' -type f | head -1")
+                    ->getOutput();
+                $header_file = trim($result);
+                if (!empty($header_file)) {
+                    copy($header_file, BUILD_INCLUDE_PATH . '/cJSON.h');
+                    echo "[I] Found and copied cJSON header from {$header_file}\n";
+                } else {
+                    throw new \RuntimeException('cJSON.h not found after build!');
+                }
             }
         }
     }
