@@ -42,7 +42,9 @@ trait libmosquitto
             -DWITH_BRIDGE=OFF \
             -DWITH_SYS_TREE=OFF \
             -DWITH_APPS=OFF \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DWITH_TESTING=OFF \
+            -DWITH_UNIT_TESTS=OFF")
             ->exec("make -j{$this->builder->concurrency} mosquitto_static || make -j{$this->builder->concurrency}")
             ->exec('make install');
 
