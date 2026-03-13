@@ -4,47 +4,44 @@ declare(strict_types=1);
 
 namespace SPC\builder\unix\library;
 
-use SPC\store\FileSystem;
-use SPC\util\executor\UnixCMakeExecutor;
+use SPC\util\executor\MosquittoCMakeExecutor;
 
 trait libmosquitto
 {
     protected function build(): void
     {
+        // 强制禁用测试（直接修改 CMakeLists.txt）
+        $this->forceDisableTests();
+
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
             mkdir($this->source_dir . '/build', 0755, true);
         }
 
-        // 首先手动修改 CMakeLists.txt，强制禁用插件目录
-        $this->disablePlugins();
-
         // 进入构建目录
         shell()->cd($this->source_dir . '/build')
             ->exec('rm -rf *')
             ->exec("{$this->builder->getOption('configure_env')} cmake .. \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_STATIC_LIBRARIES=ON \
-            -DWITH_SHARED_LIBRARIES=OFF \
-            -DWITH_TLS=ON \
-            -DWITH_WEBSOCKETS=OFF \
-            -DWITH_SRV=OFF \
-            -DDOCUMENTATION=OFF \
-            -DWITH_DOCS=OFF \
-            -DWITH_CJSON=ON \
-            -DWITH_STRIP=OFF \
-            -DWITH_BROKER=OFF \
-            -DWITH_CLIENTS=OFF \
-            -DWITH_PLUGINS=OFF \
-            -DWITH_PERSISTENCE=OFF \
-            -DWITH_BRIDGE=OFF \
-            -DWITH_SYS_TREE=OFF \
-            -DWITH_APPS=OFF \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DWITH_TESTING=OFF \
-            -DWITH_UNIT_TESTS=OFF")
+                -DBUILD_SHARED_LIBS=OFF \
+                -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_STATIC_LIBRARIES=ON \
+                -DWITH_SHARED_LIBRARIES=OFF \
+                -DWITH_TLS=ON \
+                -DWITH_WEBSOCKETS=OFF \
+                -DWITH_SRV=OFF \
+                -DDOCUMENTATION=OFF \
+                -DWITH_DOCS=OFF \
+                -DWITH_CJSON=ON \
+                -DWITH_STRIP=OFF \
+                -DWITH_BROKER=OFF \
+                -DWITH_CLIENTS=OFF \
+                -DWITH_PLUGINS=OFF \
+                -DWITH_PERSISTENCE=OFF \
+                -DWITH_BRIDGE=OFF \
+                -DWITH_SYS_TREE=OFF \
+                -DWITH_APPS=OFF \
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
             ->exec("make -j{$this->builder->concurrency} mosquitto_static || make -j{$this->builder->concurrency}")
             ->exec('make install');
 
@@ -56,37 +53,64 @@ trait libmosquitto
     }
 
     /**
-     * 手动禁用插件和任何可能引入 SQLite3 的组件
+     * 强制禁用测试 - 直接修改 CMakeLists.txt
      */
-    protected function disablePlugins(): void
+    protected function forceDisableTests(): void
     {
-        // 禁用 plugins/CMakeLists.txt
-        $plugins_cmake = $this->source_dir . '/plugins/CMakeLists.txt';
-        if (file_exists($plugins_cmake)) {
-            rename($plugins_cmake, $plugins_cmake . '.disabled');
+        $cmake_file = $this->source_dir . '/CMakeLists.txt';
+        if (file_exists($cmake_file)) {
+            $content = file_get_contents($cmake_file);
+
+            // 1. 注释掉 find_package(GTest ...) 行
+            $content = preg_replace('/find_package\s*\(\s*GTest.*?\)/m', '# $0', $content);
+
+            // 2. 注释掉 enable_testing() 行
+            $content = preg_replace('/enable_testing\s*\(\)/m', '# $0', $content);
+
+            // 3. 注释掉 add_subdirectory(test) 行
+            $content = preg_replace('/add_subdirectory\s*\(\s*test\s*\)/m', '# $0', $content);
+
+            // 4. 查找并注释掉任何包含 "test" 或 "gtest" 的条件块
+            $lines = explode("\n", $content);
+            $in_test_block = false;
+            $new_lines = [];
+
+            foreach ($lines as $line) {
+                // 如果进入测试相关的 if 块
+                if (preg_match('/if\s*\(\s*WITH_TESTING\s*\)/i', $line) ||
+                    preg_match('/if\s*\(\s*WITH_UNIT_TESTS\s*\)/i', $line)) {
+                    $in_test_block = true;
+                    $new_lines[] = '# ' . $line;  // 注释掉 if 行
+                    continue;
+                }
+
+                // 如果在测试块内
+                if ($in_test_block) {
+                    $new_lines[] = '# ' . $line;  // 注释掉块内所有行
+                    if (preg_match('/endif\s*\(.*\)/i', $line)) {
+                        $in_test_block = false;  // 结束测试块
+                    }
+                    continue;
+                }
+
+                // 正常行
+                $new_lines[] = $line;
+            }
+
+            $content = implode("\n", $new_lines);
+            file_put_contents($cmake_file, $content);
+
+            echo "[I] Modified CMakeLists.txt to disable tests\n";
         }
 
-        // 修改根 CMakeLists.txt，注释掉插件子目录
-        $root_cmake = $this->source_dir . '/CMakeLists.txt';
-        if (file_exists($root_cmake)) {
-            $content = file_get_contents($root_cmake);
-            // 注释掉 plugins 子目录的添加
-            $content = preg_replace('/add_subdirectory\(plugins\)/', '# add_subdirectory(plugins)', $content);
-            // 也禁用其他可能引入 SQLite3 的组件
-            $content = preg_replace('/add_subdirectory\(apps\)/', '# add_subdirectory(apps)', $content);
-            file_put_contents($root_cmake, $content);
-        }
-
-        // 如果存在 dynamic-security 插件目录，直接重命名
-        $dynamic_security = $this->source_dir . '/plugins/dynamic-security';
-        if (is_dir($dynamic_security)) {
-            rename($dynamic_security, $dynamic_security . '.disabled');
+        // 如果存在 test 目录，直接重命名
+        $test_dir = $this->source_dir . '/test';
+        if (is_dir($test_dir)) {
+            rename($test_dir, $test_dir . '.disabled');
+            echo "[I] Disabled test directory\n";
         }
     }
 
-    /**
-     * 复制头文件到正确位置
-     */
     protected function copyHeaderFiles(): void
     {
         // 确保 include 目录存在
@@ -98,6 +122,12 @@ trait libmosquitto
         $source_include = $this->source_dir . '/include';
         if (is_dir($source_include)) {
             \SPC\store\FileSystem::copyDir($source_include, BUILD_INCLUDE_PATH);
+        }
+
+        // 从构建产物目录复制
+        $build_include = $this->source_dir . '/build/lib/include';
+        if (is_dir($build_include)) {
+            \SPC\store\FileSystem::copyDir($build_include, BUILD_INCLUDE_PATH);
         }
 
         // 从安装目录复制
