@@ -22,72 +22,65 @@ class mosquitto extends Extension
             return true;
         }
 
-        // Unix/Linux 平台：确保头文件路径正确
-        if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto.h')) {
-            // 查找 mosquitto.h 的位置
-            $find_result = shell()->exec("find {$this->builder->getOption('work_dir')}/buildroot -name 'mosquitto.h' -type f")->getOutput();
-            if (!empty($find_result)) {
-                $header_file = trim(explode("\n", $find_result)[0]);
-                copy($header_file, BUILD_INCLUDE_PATH . '/mosquitto.h');
-            }
-        }
-
-        // 修改扩展的 config.m4，让它知道库的位置
-        $this->patchConfigM4();
+        // Unix/Linux 平台：彻底修改 config.m4
+        $this->overwriteConfigM4();
 
         return $patched;
     }
 
     /**
-     * 修改 config.m4 文件，添加库路径
+     * 完全重写 config.m4 文件
      */
-    protected function patchConfigM4(): void
+    protected function overwriteConfigM4(): void
     {
+        $work_dir = $this->builder->getOption('work_dir');
         $config_m4 = $this->source_dir . '/config.m4';
-        if (!file_exists($config_m4)) {
-            return;
-        }
 
-        $content = file_get_contents($config_m4);
-        $original = $content;
+        // 创建新的 config.m4 内容
+        $new_config = <<<EOF
+dnl config.m4 for mosquitto extension
 
-        // 在库搜索部分添加我们的路径
-        $search_pattern = '/PHP_CHECK_LIBRARY\(mosquitto/';
-        $replacement = 'PHP_ADD_LIBRARY_WITH_PATH(mosquitto, ' . BUILD_LIB_PATH . ', MOSQUITTO_SHARED_LIBADD)' . "\n" .
-            '  PHP_ADD_INCLUDE(' . BUILD_INCLUDE_PATH . ')' . "\n" .
-            '  $0';
+PHP_ARG_WITH(mosquitto, for mosquitto support,
+[  --with-mosquitto             Include mosquitto support])
 
-        $content = preg_replace($search_pattern, $replacement, $content);
+if test "\$PHP_MOSQUITTO" != "no"; then
+  dnl 直接设置库和头文件路径
+  MOSQUITTO_LIBDIR={$work_dir}/buildroot/lib
+  MOSQUITTO_INCDIR={$work_dir}/buildroot/include
 
-        // 如果上面的替换没生效，尝试另一种方式
-        if ($content === $original) {
-            // 在文件开头添加路径定义
-            $add_paths = <<<EOF
-dnl Add our build paths
-PHP_ADD_LIBPATH({$this->builder->getOption('work_dir')}/buildroot/lib, MOSQUITTO_SHARED_LIBADD)
-PHP_ADD_INCLUDE({$this->builder->getOption('work_dir')}/buildroot/include)
+  dnl 添加头文件路径
+  PHP_ADD_INCLUDE(\$MOSQUITTO_INCDIR)
 
+  dnl 添加库路径
+  PHP_ADD_LIBRARY_WITH_PATH(mosquitto, \$MOSQUITTO_LIBDIR, MOSQUITTO_SHARED_LIBADD)
+
+  dnl 检查库是否存在
+  PHP_CHECK_LIBRARY(mosquitto, mosquitto_lib_version, [
+    AC_DEFINE(HAVE_MOSQUITTO, 1, [ ])
+  ], [
+    AC_MSG_ERROR([mosquitto library not found. Please install libmosquitto])
+  ], [
+    -L\$MOSQUITTO_LIBDIR
+  ])
+
+  PHP_NEW_EXTENSION(mosquitto, mosquitto.c, \$ext_shared)
+  PHP_SUBST(MOSQUITTO_SHARED_LIBADD)
+fi
 EOF;
-            $content = $add_paths . $content;
-        }
 
-        if ($content !== $original) {
-            file_put_contents($config_m4, $content);
-            echo "[I] Patched mosquitto config.m4\n";
-        }
+        file_put_contents($config_m4, $new_config);
+        echo "[I] Completely rewrote mosquitto config.m4\n";
     }
 
     public function getUnixConfigureArg(bool $shared = false): string
     {
-        // 对于 mosquitto 扩展，我们使用环境变量来传递库路径
+        // 设置环境变量，但主要依赖修改后的 config.m4
         $work_dir = $this->builder->getOption('work_dir');
 
-        // 设置环境变量让 configure 能找到库
-        putenv("CPPFLAGS=-I{$work_dir}/buildroot/include");
-        putenv("LDFLAGS=-L{$work_dir}/buildroot/lib");
         putenv("PKG_CONFIG_PATH={$work_dir}/buildroot/lib/pkgconfig");
+        putenv("CFLAGS=-I{$work_dir}/buildroot/include");
+        putenv("LDFLAGS=-L{$work_dir}/buildroot/lib");
 
-        // 返回标准参数
         return '--with-mosquitto' . ($shared ? '=shared' : '');
     }
 
