@@ -203,32 +203,47 @@ trait libmosquitto
             FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
         }
 
-        // 新增：确保 mqtt_protocol.h 在正确的位置
-        $mqtt_protocol_sources = [
-            $this->source_dir . '/include/mqtt_protocol.h',
-            $work_dir . '/buildroot/include/mqtt_protocol.h',
-            $this->source_dir . '/lib/mqtt_protocol.h',
-        ];
+        // 创建完整的目录结构
+        $this->createCompleteIncludeStructure();
+    }
 
-        foreach ($mqtt_protocol_sources as $source) {
-            if (file_exists($source)) {
-                copy($source, BUILD_INCLUDE_PATH . '/mqtt_protocol.h');
-                echo "[I] Copied mqtt_protocol.h from {$source}\n";
-                break;
+    /**
+     * 创建完整的 include 目录结构
+     */
+    protected function createCompleteIncludeStructure(): void
+    {
+        $work_dir = $this->builder->getOption('work_dir');
+        $include_path = BUILD_INCLUDE_PATH;
+
+        // 1. 确保 mosquitto 子目录存在
+        if (!is_dir($include_path . '/mosquitto')) {
+            mkdir($include_path . '/mosquitto', 0755, true);
+        }
+
+        // 2. 将所有 .h 文件复制到 mosquitto 子目录
+        $headers = glob($include_path . '/*.h');
+        foreach ($headers as $header) {
+            $basename = basename($header);
+            $target = $include_path . '/mosquitto/' . $basename;
+            if (!file_exists($target)) {
+                copy($header, $target);
+                echo "[I] Copied {$basename} to mosquitto subdirectory\n";
             }
         }
 
-        // 创建 mosquitto 子目录并复制头文件
-        if (!is_dir(BUILD_INCLUDE_PATH . '/mosquitto')) {
-            mkdir(BUILD_INCLUDE_PATH . '/mosquitto', 0755, true);
-        }
+        // 3. 特别确保 mqtt_protocol.h 存在
+        $mqtt_sources = [
+            $this->source_dir . '/include/mqtt_protocol.h',
+            $this->source_dir . '/lib/mqtt_protocol.h',
+            $include_path . '/mqtt_protocol.h',
+        ];
 
-        // 复制所有头文件到 mosquitto 子目录
-        $headers = glob(BUILD_INCLUDE_PATH . '/*.h');
-        foreach ($headers as $header) {
-            $basename = basename($header);
-            if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto/' . $basename)) {
-                copy($header, BUILD_INCLUDE_PATH . '/mosquitto/' . $basename);
+        foreach ($mqtt_sources as $source) {
+            if (file_exists($source)) {
+                copy($source, $include_path . '/mqtt_protocol.h');
+                copy($source, $include_path . '/mosquitto/mqtt_protocol.h');
+                echo "[I] Ensured mqtt_protocol.h exists\n";
+                break;
             }
         }
     }
