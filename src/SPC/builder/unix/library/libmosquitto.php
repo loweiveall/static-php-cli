@@ -10,47 +10,49 @@ trait libmosquitto
 {
     protected function build(): void
     {
-        // 1. 确保cJSON头文件存在
+        // 1. 确保 cJSON 头文件存在
         $this->ensureCjsonHeaders();
 
-        // 2. 修复cJSON包含路径
+        // 2. 修复头文件引用
         $this->fixCjsonIncludes();
 
-        // 3. 精确修改CMakeLists.txt
-        $this->patchCMakeLists();
-
-        // 4. 特别修改 lib/CMakeLists.txt
-        $this->patchLibCMakeLists();
+        // 3. 修改 CMakeLists.txt 禁用 cpp
+        $this->disableCpp();
 
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
             mkdir($this->source_dir . '/build', 0755, true);
         }
 
+        // 获取正确的工作目录路径
+        $work_dir = $this->builder->getOption('work_dir');
+
         // 进入构建目录
         shell()->cd($this->source_dir . '/build')
             ->exec('rm -rf *')
             ->exec("{$this->builder->getOption('configure_env')} cmake .. \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DCMAKE_INSTALL_PREFIX={$this->builder->getOption('work_dir')}/buildroot \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DWITH_STATIC_LIBRARIES=ON \
-                -DWITH_SHARED_LIBRARIES=OFF \
-                -DWITH_TLS=ON \
-                -DWITH_WEBSOCKETS=OFF \
-                -DWITH_SRV=OFF \
-                -DDOCUMENTATION=OFF \
-                -DWITH_DOCS=OFF \
-                -DWITH_CJSON=ON \
-                -DWITH_STRIP=OFF \
-                -DWITH_BROKER=OFF \
-                -DWITH_CLIENTS=OFF \
-                -DWITH_PLUGINS=OFF \
-                -DWITH_PERSISTENCE=OFF \
-                -DWITH_BRIDGE=OFF \
-                -DWITH_SYS_TREE=OFF \
-                -DWITH_APPS=OFF \
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX={$work_dir}/buildroot \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_STATIC_LIBRARIES=ON \
+            -DWITH_SHARED_LIBRARIES=OFF \
+            -DWITH_TLS=ON \
+            -DWITH_CJSON=ON \
+            -DWITH_BROKER=OFF \
+            -DWITH_CLIENTS=OFF \
+            -DWITH_PLUGINS=OFF \
+            -DWITH_PERSISTENCE=OFF \
+            -DWITH_BRIDGE=OFF \
+            -DWITH_SYS_TREE=OFF \
+            -DWITH_APPS=OFF \
+            -DWITH_WEBSOCKETS=OFF \
+            -DWITH_SRV=OFF \
+            -DDOCUMENTATION=OFF \
+            -DWITH_DOCS=OFF \
+            -DWITH_STRIP=OFF \
+            -DWITH_CPP=OFF \
+            -DWITH_TESTING=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON")
             ->exec("make -j{$this->builder->concurrency}")
             ->exec('make install');
 
@@ -60,23 +62,43 @@ trait libmosquitto
         // 复制头文件
         $this->copyHeaderFiles();
 
-        // 生成pkg-config文件
+        // 生成 pkg-config 文件
         $this->patchPkgconf();
     }
 
     protected function ensureLibraryFiles(): void
     {
-        $lib_dir = BUILD_LIB_PATH;
+        $work_dir = $this->builder->getOption('work_dir');
+        $lib_dir = BUILD_LIB_PATH;  // 应该是 /app/buildroot/lib
 
-        // 如果生成了 libmosquitto_static.a 但没有 libmosquitto.a，创建符号链接
-        if (file_exists($lib_dir . '/libmosquitto_static.a') && !file_exists($lib_dir . '/libmosquitto.a')) {
-            shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
-            echo "[I] Created symlink: libmosquitto.a -> libmosquitto_static.a\n";
+        echo "[I] Checking for mosquitto static library in: {$lib_dir}\n";
+
+        // 列出目录内容以便调试
+        if (is_dir($lib_dir)) {
+            $files = scandir($lib_dir);
+            echo "[I] Files in {$lib_dir}: " . implode(', ', array_diff($files, ['.', '..'])) . "\n";
         }
 
-        // 如果两个都不存在，报错
-        if (!file_exists($lib_dir . '/libmosquitto.a') && !file_exists($lib_dir . '/libmosquitto_static.a')) {
-            throw new \RuntimeException('No mosquitto static library found!');
+        // 检查是否有 libmosquitto_static.a
+        if (file_exists($lib_dir . '/libmosquitto_static.a')) {
+            echo "[I] Found libmosquitto_static.a\n";
+
+            // 创建符号链接
+            if (!file_exists($lib_dir . '/libmosquitto.a')) {
+                shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
+                echo "[I] Created symlink: libmosquitto.a -> libmosquitto_static.a\n";
+            }
+        }
+        // 检查安装目录
+        elseif (file_exists($work_dir . '/buildroot/lib/libmosquitto_static.a')) {
+            echo "[I] Found libmosquitto_static.a in buildroot, copying...\n";
+            copy($work_dir . '/buildroot/lib/libmosquitto_static.a', $lib_dir . '/libmosquitto_static.a');
+
+            // 创建符号链接
+            shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
+        }
+        else {
+            throw new \RuntimeException('No mosquitto static library found in ' . $lib_dir . ' or ' . $work_dir . '/buildroot/lib');
         }
     }
 
