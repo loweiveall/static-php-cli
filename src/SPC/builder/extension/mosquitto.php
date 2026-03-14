@@ -13,7 +13,8 @@ class mosquitto extends Extension
 {
     public function patchBeforeConfigure(): bool
     {
-        $this->setupHeaderPaths();
+        // 在 configure 之前设置所有必要的路径和文件
+        $this->setupEnvironment();
         return true;
     }
 
@@ -22,7 +23,6 @@ class mosquitto extends Extension
         $patched = parent::patchBeforeMake();
 
         if (PHP_OS_FAMILY === 'Windows') {
-            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\php_mosquitto.h', '/^#warning.*/m', '');
             return true;
         }
 
@@ -33,7 +33,225 @@ class mosquitto extends Extension
     }
 
     /**
-     * 为 PHP 8.2 打补丁，移除 TSRMLS_CC
+     * 设置完整的编译环境
+     */
+    protected function setupEnvironment(): void
+    {
+        $work_dir = $this->builder->getOption('work_dir');
+
+        echo "[I] ===== Setting up mosquitto build environment =====\n";
+
+        // 1. 确保所有目录存在
+        $dirs = [
+            '/usr/local/lib',
+            '/usr/local/include',
+            '/usr/local/include/mosquitto',
+            $work_dir . '/buildroot/lib',
+            $work_dir . '/buildroot/include',
+            $work_dir . '/buildroot/include/mosquitto',
+        ];
+
+        foreach ($dirs as $dir) {
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+                echo "[I] Created directory: {$dir}\n";
+            }
+        }
+
+        // 2. 查找并复制库文件到标准位置
+        $lib_files = [
+            'libmosquitto.a',
+            'libmosquitto_static.a',
+            'libcjson.a',
+            'libssl.a',
+            'libcrypto.a',
+        ];
+
+        foreach ($lib_files as $lib) {
+            // 查找库文件
+            $found = false;
+            $search_paths = [
+                $work_dir . '/buildroot/lib/' . $lib,
+                '/buildroot/lib/' . $lib,
+                '/app/buildroot/lib/' . $lib,
+            ];
+
+            foreach ($search_paths as $path) {
+                if (file_exists($path)) {
+                    echo "[I] Found {$lib} at: {$path}\n";
+
+                    // 复制到 /usr/local/lib
+                    $target = '/usr/local/lib/' . $lib;
+                    if (!file_exists($target)) {
+                        copy($path, $target);
+                        echo "[I] Copied to: {$target}\n";
+                    }
+
+                    // 同时复制到 buildroot/lib
+                    $buildroot_target = $work_dir . '/buildroot/lib/' . $lib;
+                    if (!file_exists($buildroot_target)) {
+                        copy($path, $buildroot_target);
+                        echo "[I] Copied to: {$buildroot_target}\n";
+                    }
+
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                echo "[W] Could not find {$lib}\n";
+            }
+        }
+
+        // 3. 复制所有头文件
+        $header_dirs = [
+            $work_dir . '/buildroot/include',
+            '/buildroot/include',
+        ];
+
+        foreach ($header_dirs as $header_dir) {
+            if (is_dir($header_dir)) {
+                $this->copyHeaders($header_dir, '/usr/local/include');
+            }
+        }
+
+        // 4. 特别处理 mosquitto 头文件
+        $mosquitto_headers = [
+            'mosquitto.h',
+            'mosquitto_broker.h',
+            'mosquitto_plugin.h',
+            'mosquittopp.h',
+            'mqtt_protocol.h',
+            'libmosquitto.h',
+        ];
+
+        foreach ($mosquitto_headers as $header) {
+            $found = false;
+            $search_paths = [
+                $work_dir . '/buildroot/include/' . $header,
+                $work_dir . '/buildroot/include/mosquitto/' . $header,
+                '/buildroot/include/' . $header,
+                '/buildroot/include/mosquitto/' . $header,
+            ];
+
+            foreach ($search_paths as $path) {
+                if (file_exists($path)) {
+                    // 复制到根目录
+                    copy($path, '/usr/local/include/' . $header);
+                    // 复制到 mosquitto 子目录
+                    copy($path, '/usr/local/include/mosquitto/' . $header);
+                    echo "[I] Installed header: {$header}\n";
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                echo "[W] Could not find header: {$header}\n";
+            }
+        }
+
+        // 5. 创建或更新 pkg-config 文件
+        $pc_content = <<<EOF
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: libmosquitto
+Description: Eclipse Mosquitto MQTT library
+Version: 2.0.18
+Libs: -L\${libdir} -lmosquitto
+Cflags: -I\${includedir}
+Requires.private: openssl cjson
+
+EOF;
+
+        $pc_path = '/usr/local/lib/pkgconfig/libmosquitto.pc';
+        if (!is_dir(dirname($pc_path))) {
+            mkdir(dirname($pc_path), 0755, true);
+        }
+        file_put_contents($pc_path, $pc_content);
+        echo "[I] Created pkg-config file: {$pc_path}\n";
+
+        // 6. 设置环境变量
+        putenv("PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig:/buildroot/lib/pkgconfig");
+        putenv("CFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include -I/buildroot/include");
+        putenv("CPPFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include -I/buildroot/include");
+        putenv("LDFLAGS=-L/usr/local/lib -L{$work_dir}/buildroot/lib -L/buildroot/lib");
+
+        // 7. 验证设置
+        echo "[I] ===== Environment verification =====\n";
+
+        // 检查库文件
+        $check_libs = ['libmosquitto.a', 'libcjson.a', 'libssl.a', 'libcrypto.a'];
+        foreach ($check_libs as $lib) {
+            $paths = [
+                '/usr/local/lib/' . $lib,
+                $work_dir . '/buildroot/lib/' . $lib,
+                '/buildroot/lib/' . $lib,
+            ];
+            foreach ($paths as $path) {
+                if (file_exists($path)) {
+                    echo "[I] ✓ {$lib} found at: {$path}\n";
+                    break;
+                }
+            }
+        }
+
+        // 检查头文件
+        $check_headers = ['mosquitto.h', 'cJSON.h', 'mqtt_protocol.h'];
+        foreach ($check_headers as $header) {
+            $paths = [
+                '/usr/local/include/' . $header,
+                '/usr/local/include/mosquitto/' . $header,
+            ];
+            foreach ($paths as $path) {
+                if (file_exists($path)) {
+                    echo "[I] ✓ {$header} found at: {$path}\n";
+                    break;
+                }
+            }
+        }
+
+        echo "[I] ===== Environment setup complete =====\n";
+    }
+
+    /**
+     * 复制头文件
+     */
+    protected function copyHeaders(string $source, string $dest): void
+    {
+        if (!is_dir($source)) {
+            return;
+        }
+
+        $files = scandir($source);
+        foreach ($files as $file) {
+            if ($file === '.' || $file === '..') {
+                continue;
+            }
+
+            $source_path = $source . '/' . $file;
+            $dest_path = $dest . '/' . $file;
+
+            if (is_dir($source_path)) {
+                if (!is_dir($dest_path)) {
+                    mkdir($dest_path, 0755, true);
+                }
+                $this->copyHeaders($source_path, $dest_path);
+            } elseif (pathinfo($file, PATHINFO_EXTENSION) === 'h') {
+                if (!file_exists($dest_path)) {
+                    copy($source_path, $dest_path);
+                    echo "[I] Copied header: {$file}\n";
+                }
+            }
+        }
+    }
+
+    /**
+     * 为 PHP 8.2 打补丁
      */
     protected function patchForPHP82(): void
     {
@@ -45,122 +263,31 @@ class mosquitto extends Extension
         $content = file_get_contents($source_file);
         $original = $content;
 
-        // 1. 移除 REGISTER_MOSQUITTO_LONG_CONST 宏中的 TSRMLS_CC
+        // 移除 TSRMLS_CC
         $content = preg_replace(
             '/zend_declare_class_constant_long\(([^,]+), ([^,]+), ([^,]+), ([^)]+)\) TSRMLS_CC;/',
             'zend_declare_class_constant_long($1, $2, $3, $4);',
             $content
         );
 
-        // 2. 移除其他地方的 TSRMLS_CC
         $content = str_replace(' TSRMLS_CC', '', $content);
         $content = str_replace('TSRMLS_CC', '', $content);
 
-        // 3. 移除 TSRMLS_DC 相关的代码
-        $content = str_replace('TSRMLS_DC', '', $content);
-        $content = str_replace(', TSRMLS_DC', '', $content);
-
-        // 4. 检查函数声明中是否有 TSRMLS_DC 参数
-        $content = preg_replace(
-            '/PHP_FUNCTION\(([^)]+)\)\s*{\s*TSRMLS_DC;/',
-            'PHP_FUNCTION($1) {',
-            $content
-        );
-
         if ($content !== $original) {
             file_put_contents($source_file, $content);
-            echo "[I] Applied PHP 8.2 compatibility patch to mosquitto.c\n";
+            echo "[I] Applied PHP 8.2 compatibility patch\n";
         }
-
-        // 同时检查并修改其他文件
-        $other_files = [
-            $this->source_dir . '/mosquitto_client.c',
-            $this->source_dir . '/mosquitto_message.c',
-            $this->source_dir . '/mosquitto_private.h',
-            $this->source_dir . '/php_mosquitto.h',
-        ];
-
-        foreach ($other_files as $file) {
-            if (file_exists($file)) {
-                $file_content = file_get_contents($file);
-                $file_original = $file_content;
-
-                $file_content = str_replace(' TSRMLS_CC', '', $file_content);
-                $file_content = str_replace('TSRMLS_CC', '', $file_content);
-                $file_content = str_replace(' TSRMLS_DC', '', $file_content);
-                $file_content = str_replace('TSRMLS_DC', '', $file_content);
-
-                if ($file_content !== $file_original) {
-                    file_put_contents($file, $file_content);
-                    echo "[I] Applied PHP 8.2 compatibility patch to " . basename($file) . "\n";
-                }
-            }
-        }
-    }
-
-    /**
-     * 设置正确的头文件路径
-     */
-    protected function setupHeaderPaths(): void
-    {
-        $work_dir = $this->builder->getOption('work_dir');
-        $buildroot_include = '/buildroot/include';
-        $app_buildroot_include = $work_dir . '/buildroot/include';
-
-        echo "[I] Setting up header paths...\n";
-
-        // 确保 /buildroot 存在
-        if (!is_dir('/buildroot') && is_dir($work_dir . '/buildroot')) {
-            symlink($work_dir . '/buildroot', '/buildroot');
-            echo "[I] Created symlink /buildroot -> {$work_dir}/buildroot\n";
-        }
-
-        // 设置编译器环境变量
-        $include_paths = [
-            '/usr/local/include',
-            $buildroot_include,
-            $app_buildroot_include,
-            $buildroot_include . '/mosquitto',
-            $app_buildroot_include . '/mosquitto',
-        ];
-
-        $cflags = '-g -fstack-protector-strong -fno-ident -fPIE -fPIC -Os';
-        foreach ($include_paths as $path) {
-            if (is_dir($path)) {
-                $cflags .= ' -I' . $path;
-            }
-        }
-
-        putenv("CFLAGS={$cflags}");
-        putenv("CPPFLAGS={$cflags}");
-        putenv("PKG_CONFIG_PATH=/buildroot/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig");
-
-        echo "[I] Set CFLAGS: {$cflags}\n";
     }
 
     public function getUnixConfigureArg(bool $shared = false): string
     {
+        // 设置环境变量
         $work_dir = $this->builder->getOption('work_dir');
 
-        $include_paths = [
-            '/usr/local/include',
-            '/buildroot/include',
-            $work_dir . '/buildroot/include',
-            '/buildroot/include/mosquitto',
-            $work_dir . '/buildroot/include/mosquitto',
-        ];
-
-        $cflags = '-g -fstack-protector-strong -fno-ident -fPIE -fPIC -Os';
-        foreach ($include_paths as $path) {
-            if (is_dir($path)) {
-                $cflags .= ' -I' . $path;
-            }
-        }
-
-        putenv("CFLAGS={$cflags}");
-        putenv("CPPFLAGS={$cflags}");
-        putenv("PKG_CONFIG_PATH=/buildroot/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig");
-        putenv("LDFLAGS=-L/buildroot/lib -L{$work_dir}/buildroot/lib");
+        putenv("PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig:/buildroot/lib/pkgconfig");
+        putenv("CFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include -I/buildroot/include");
+        putenv("CPPFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include -I/buildroot/include");
+        putenv("LDFLAGS=-L/usr/local/lib -L{$work_dir}/buildroot/lib -L/buildroot/lib");
 
         return '--with-mosquitto' . ($shared ? '=shared' : '');
     }
