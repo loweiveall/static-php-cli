@@ -144,42 +144,52 @@ trait libmosquitto
             ->exec("find . -name '*.c' -o -name '*.h' -o -name '*.cpp' | xargs sed -i 's/#include \"cjson\\/cJSON.h\"/#include \"cJSON.h\"/g' 2>/dev/null || true");
     }
 
-    /**
-     * 确保库文件存在
-     */
     protected function ensureLibraryFiles(): void
     {
         $work_dir = $this->builder->getOption('work_dir');
-        $lib_dir = BUILD_LIB_PATH;
+        $lib_dir = BUILD_LIB_PATH;  // /app/buildroot/lib
+        $buildroot_lib = '/buildroot/lib';  // 重要
 
-        echo "[I] Checking for mosquitto static library in: {$lib_dir}\n";
+        echo "[I] Checking for mosquitto static library...\n";
 
-        // 列出目录内容以便调试
-        if (is_dir($lib_dir)) {
-            $files = scandir($lib_dir);
-            echo "[I] Files in {$lib_dir}: " . implode(', ', array_diff($files, ['.', '..'])) . "\n";
+        // 确保 /buildroot 存在
+        if (!is_dir('/buildroot')) {
+            symlink($work_dir . '/buildroot', '/buildroot');
+            echo "[I] Created symlink /buildroot -> {$work_dir}/buildroot\n";
         }
 
-        // 检查是否有 libmosquitto_static.a
-        if (file_exists($lib_dir . '/libmosquitto_static.a')) {
-            echo "[I] Found libmosquitto_static.a\n";
+        // 检查所有可能的位置
+        $possible_libs = [
+            $lib_dir . '/libmosquitto_static.a',
+            $lib_dir . '/libmosquitto.a',
+            $buildroot_lib . '/libmosquitto_static.a',
+            $buildroot_lib . '/libmosquitto.a',
+            $work_dir . '/buildroot/lib/libmosquitto_static.a',
+        ];
 
-            // 创建符号链接
-            if (!file_exists($lib_dir . '/libmosquitto.a')) {
-                shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
-                echo "[I] Created symlink: libmosquitto.a -> libmosquitto_static.a\n";
+        $found = false;
+        foreach ($possible_libs as $lib) {
+            if (file_exists($lib)) {
+                echo "[I] Found mosquitto static library at: {$lib}\n";
+
+                // 确保在标准位置也有库文件
+                if (!file_exists($lib_dir . '/libmosquitto.a')) {
+                    copy($lib, $lib_dir . '/libmosquitto.a');
+                    echo "[I] Copied to {$lib_dir}/libmosquitto.a\n";
+                }
+
+                if (!file_exists($buildroot_lib . '/libmosquitto.a') && is_dir($buildroot_lib)) {
+                    copy($lib, $buildroot_lib . '/libmosquitto.a');
+                    echo "[I] Copied to {$buildroot_lib}/libmosquitto.a\n";
+                }
+
+                $found = true;
+                break;
             }
         }
-        // 检查安装目录
-        elseif (file_exists($work_dir . '/buildroot/lib/libmosquitto_static.a')) {
-            echo "[I] Found libmosquitto_static.a in buildroot, copying...\n";
-            copy($work_dir . '/buildroot/lib/libmosquitto_static.a', $lib_dir . '/libmosquitto_static.a');
 
-            // 创建符号链接
-            shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
-        }
-        else {
-            throw new \RuntimeException('No mosquitto static library found in ' . $lib_dir . ' or ' . $work_dir . '/buildroot/lib');
+        if (!$found) {
+            throw new \RuntimeException('No mosquitto static library found!');
         }
     }
 

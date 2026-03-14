@@ -13,38 +13,35 @@ class mosquitto extends Extension
 {
     public function patchBeforeConfigure(): bool
     {
-        // 在 configure 之前执行，确保头文件路径正确
-        $this->setupHeaderFiles();
+        $this->setupHeaderPaths();
         return true;
     }
 
-    public function patchBeforeMake(): bool
-    {
-        $patched = parent::patchBeforeMake();
-
-        if (PHP_OS_FAMILY === 'Windows') {
-            FileSystem::replaceFileRegex(BUILD_INCLUDE_PATH . '\php_mosquitto.h', '/^#warning.*/m', '');
-            return true;
-        }
-
-        return $patched;
-    }
-
     /**
-     * 设置完整的头文件结构
+     * 设置正确的头文件路径
      */
-    protected function setupHeaderFiles(): void
+    protected function setupHeaderPaths(): void
     {
         $work_dir = $this->builder->getOption('work_dir');
-        $buildroot_include = $work_dir . '/buildroot/include';
-        $usr_include = '/usr/local/include';
 
-        echo "[I] Setting up mosquitto header files...\n";
+        // 重要：mosquitto 安装到了 /buildroot，而不是 /app/buildroot
+        $buildroot_include = '/buildroot/include';
+        $app_buildroot_include = $work_dir . '/buildroot/include';
 
-        // 1. 创建必要的目录
+        echo "[I] Setting up header paths...\n";
+
+        // 1. 确保 /buildroot/include 存在且包含所有头文件
+        if (!is_dir('/buildroot')) {
+            symlink($work_dir . '/buildroot', '/buildroot');
+            echo "[I] Created symlink /buildroot -> {$work_dir}/buildroot\n";
+        }
+
+        // 2. 创建必要的目录结构
         $dirs = [
-            $usr_include,
-            $usr_include . '/mosquitto',
+            '/usr/local/include',
+            '/usr/local/include/mosquitto',
+            $buildroot_include,
+            $buildroot_include . '/mosquitto',
         ];
 
         foreach ($dirs as $dir) {
@@ -54,44 +51,43 @@ class mosquitto extends Extension
             }
         }
 
-        // 2. 复制所有头文件到正确的位置
-        $this->copyHeadersRecursive($buildroot_include, $usr_include);
-
-        // 3. 特别处理 mosquitto 子目录
-        if (is_dir($buildroot_include . '/mosquitto')) {
-            $this->copyHeadersRecursive($buildroot_include . '/mosquitto', $usr_include . '/mosquitto');
+        // 3. 复制所有头文件到标准位置
+        if (is_dir($buildroot_include)) {
+            $this->copyHeaders($buildroot_include, '/usr/local/include');
         }
 
-        // 4. 确保 mqtt_protocol.h 同时存在于根目录和 mosquitto 子目录
-        $mqtt_protocol_sources = [
-            $buildroot_include . '/mqtt_protocol.h',
-            $buildroot_include . '/mosquitto/mqtt_protocol.h',
-            $work_dir . '/source/libmosquitto/include/mqtt_protocol.h',
+        if (is_dir($app_buildroot_include)) {
+            $this->copyHeaders($app_buildroot_include, '/usr/local/include');
+        }
+
+        // 4. 设置编译器环境变量 - 同时包含两个路径
+        $include_paths = [
+            '/usr/local/include',
+            $buildroot_include,
+            $app_buildroot_include,
+            $buildroot_include . '/mosquitto',
+            $app_buildroot_include . '/mosquitto',
         ];
 
-        foreach ($mqtt_protocol_sources as $source) {
-            if (file_exists($source)) {
-                copy($source, $usr_include . '/mqtt_protocol.h');
-                copy($source, $usr_include . '/mosquitto/mqtt_protocol.h');
-                echo "[I] Copied mqtt_protocol.h from {$source}\n";
-                break;
+        $cflags = '-g -fstack-protector-strong -fno-ident -fPIE -fPIC -Os';
+        foreach ($include_paths as $path) {
+            if (is_dir($path)) {
+                $cflags .= ' -I' . $path;
             }
         }
 
-        // 5. 修复 mosquitto.h 中的包含路径
-        $this->fixMosquittoHeader($usr_include . '/mosquitto.h');
+        // 设置环境变量
+        putenv("CFLAGS={$cflags}");
+        putenv("CPPFLAGS={$cflags}");
+        putenv("PKG_CONFIG_PATH=/buildroot/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig");
 
-        // 6. 设置编译环境变量
-        putenv("CFLAGS=-I{$usr_include} -I{$buildroot_include}");
-        putenv("CPPFLAGS=-I{$usr_include} -I{$buildroot_include}");
-
-        echo "[I] Header files setup complete\n";
+        echo "[I] Set CFLAGS: {$cflags}\n";
     }
 
     /**
-     * 递归复制头文件
+     * 复制头文件
      */
-    protected function copyHeadersRecursive(string $source, string $dest): void
+    protected function copyHeaders(string $source, string $dest): void
     {
         if (!is_dir($source)) {
             return;
@@ -110,32 +106,13 @@ class mosquitto extends Extension
                 if (!is_dir($dest_path)) {
                     mkdir($dest_path, 0755, true);
                 }
-                $this->copyHeadersRecursive($source_path, $dest_path);
+                $this->copyHeaders($source_path, $dest_path);
             } elseif (pathinfo($file, PATHINFO_EXTENSION) === 'h') {
-                copy($source_path, $dest_path);
-                echo "[I] Copied header: {$file}\n";
+                if (!file_exists($dest_path)) {
+                    copy($source_path, $dest_path);
+                    echo "[I] Copied header: {$file}\n";
+                }
             }
-        }
-    }
-
-    /**
-     * 修复 mosquitto.h 中的包含路径
-     */
-    protected function fixMosquittoHeader(string $header_path): void
-    {
-        if (!file_exists($header_path)) {
-            return;
-        }
-
-        $content = file_get_contents($header_path);
-        $original = $content;
-
-        // 将 #include <mosquitto/xxx.h> 改为 #include <xxx.h>
-        $content = preg_replace('/#include\s+<mosquitto\/([^>]+)>/', '#include <$1>', $content);
-
-        if ($content !== $original) {
-            file_put_contents($header_path, $content);
-            echo "[I] Fixed include paths in mosquitto.h\n";
         }
     }
 
@@ -143,11 +120,26 @@ class mosquitto extends Extension
     {
         $work_dir = $this->builder->getOption('work_dir');
 
-        // 设置环境变量
-        putenv("PKG_CONFIG_PATH={$work_dir}/buildroot/lib/pkgconfig");
-        putenv("CFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include");
-        putenv("CPPFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include");
-        putenv("LDFLAGS=-L{$work_dir}/buildroot/lib");
+        // 设置所有必要的环境变量
+        $include_paths = [
+            '/usr/local/include',
+            '/buildroot/include',
+            $work_dir . '/buildroot/include',
+            '/buildroot/include/mosquitto',
+            $work_dir . '/buildroot/include/mosquitto',
+        ];
+
+        $cflags = '-g -fstack-protector-strong -fno-ident -fPIE -fPIC -Os';
+        foreach ($include_paths as $path) {
+            if (is_dir($path)) {
+                $cflags .= ' -I' . $path;
+            }
+        }
+
+        putenv("CFLAGS={$cflags}");
+        putenv("CPPFLAGS={$cflags}");
+        putenv("PKG_CONFIG_PATH=/buildroot/lib/pkgconfig:{$work_dir}/buildroot/lib/pkgconfig");
+        putenv("LDFLAGS=-L/buildroot/lib -L{$work_dir}/buildroot/lib");
 
         return '--with-mosquitto' . ($shared ? '=shared' : '');
     }
