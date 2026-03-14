@@ -19,6 +19,9 @@ trait libmosquitto
         // 3. 修改 CMakeLists.txt 禁用 cpp
         $this->disableCpp();
 
+        // 4. 修改 CMakeLists.txt 禁用测试
+        $this->disableTesting();  // 新增
+
         // 创建构建目录
         if (!is_dir($this->source_dir . '/build')) {
             mkdir($this->source_dir . '/build', 0755, true);
@@ -241,5 +244,43 @@ EOF;
         }
 
         file_put_contents(BUILD_LIB_PATH . '/pkgconfig/libmosquitto.pc', $pc_content);
+    }
+
+    /**
+     * 彻底禁用测试
+     */
+    protected function disableTesting(): void
+    {
+        $cmake_file = $this->source_dir . '/CMakeLists.txt';
+        if (!file_exists($cmake_file)) {
+            return;
+        }
+
+        $content = file_get_contents($cmake_file);
+        $original = $content;
+
+        // 1. 注释掉 find_package(GTest ...) 行
+        $content = preg_replace('/find_package\s*\(\s*GTest.*?\)/s', '# $0', $content);
+
+        // 2. 注释掉 enable_testing() 行
+        $content = str_replace('enable_testing()', '# enable_testing()', $content);
+
+        // 3. 注释掉 add_subdirectory(test) 行
+        $content = preg_replace('/add_subdirectory\s*\(\s*test\s*\)/', '# add_subdirectory(test)', $content);
+
+        // 4. 注释掉所有 WITH_TESTING 相关的条件块
+        $content = preg_replace('/if\s*\(\s*WITH_TESTING.*?endif\s*\(\)/s', '# $0', $content);
+
+        if ($content !== $original) {
+            file_put_contents($cmake_file, $content);
+            echo "[I] Disabled testing in main CMakeLists.txt\n";
+        }
+
+        // 5. 如果存在 test 目录，重命名它
+        $test_dir = $this->source_dir . '/test';
+        if (is_dir($test_dir)) {
+            rename($test_dir, $test_dir . '.disabled');
+            echo "[I] Renamed test directory\n";
+        }
     }
 }
