@@ -148,14 +148,52 @@ trait libmosquitto
     {
         $work_dir = $this->builder->getOption('work_dir');
         $lib_dir = BUILD_LIB_PATH;  // /app/buildroot/lib
-        $buildroot_lib = '/buildroot/lib';  // 重要
+        $buildroot_lib = '/buildroot/lib';
 
-        echo "[I] Checking for mosquitto static library...\n";
+        echo "[I] ===== DEBUG: ensureLibraryFiles() =====\n";
+        echo "[I] work_dir: {$work_dir}\n";
+        echo "[I] BUILD_LIB_PATH: " . BUILD_LIB_PATH . "\n";
+        echo "[I] lib_dir: {$lib_dir}\n";
+        echo "[I] buildroot_lib: {$buildroot_lib}\n";
 
-        // 确保 /buildroot 存在
-        if (!is_dir('/buildroot')) {
-            symlink($work_dir . '/buildroot', '/buildroot');
-            echo "[I] Created symlink /buildroot -> {$work_dir}/buildroot\n";
+        // 检查目录是否存在
+        echo "[I] Checking if directories exist:\n";
+        echo "[I] - lib_dir exists: " . (is_dir($lib_dir) ? 'YES' : 'NO') . "\n";
+        echo "[I] - buildroot_lib exists: " . (is_dir($buildroot_lib) ? 'YES' : 'NO') . "\n";
+        echo "[I] - {$work_dir}/buildroot/lib exists: " . (is_dir($work_dir . '/buildroot/lib') ? 'YES' : 'NO') . "\n";
+
+        // 列出 lib_dir 的内容
+        if (is_dir($lib_dir)) {
+            $files = scandir($lib_dir);
+            echo "[I] Files in {$lib_dir}:\n";
+            foreach ($files as $file) {
+                if ($file !== '.' && $file !== '..') {
+                    echo "[I]   - {$file}\n";
+                }
+            }
+        }
+
+        // 列出 /buildroot/lib 的内容
+        if (is_dir($buildroot_lib)) {
+            $files = scandir($buildroot_lib);
+            echo "[I] Files in {$buildroot_lib}:\n";
+            foreach ($files as $file) {
+                if ($file !== '.' && $file !== '..') {
+                    echo "[I]   - {$file}\n";
+                }
+            }
+        }
+
+        // 列出 work_dir/buildroot/lib 的内容
+        $work_buildroot_lib = $work_dir . '/buildroot/lib';
+        if (is_dir($work_buildroot_lib)) {
+            $files = scandir($work_buildroot_lib);
+            echo "[I] Files in {$work_buildroot_lib}:\n";
+            foreach ($files as $file) {
+                if ($file !== '.' && $file !== '..') {
+                    echo "[I]   - {$file}\n";
+                }
+            }
         }
 
         // 检查所有可能的位置
@@ -165,11 +203,17 @@ trait libmosquitto
             $buildroot_lib . '/libmosquitto_static.a',
             $buildroot_lib . '/libmosquitto.a',
             $work_dir . '/buildroot/lib/libmosquitto_static.a',
+            $work_dir . '/buildroot/lib/libmosquitto.a',
+            '/buildroot/lib/libmosquitto_static.a',
+            '/buildroot/lib/libmosquitto.a',
         ];
 
         $found = false;
         foreach ($possible_libs as $lib) {
-            if (file_exists($lib)) {
+            $exists = file_exists($lib);
+            echo "[I] Checking {$lib}: " . ($exists ? 'FOUND' : 'not found') . "\n";
+
+            if ($exists && !$found) {
                 echo "[I] Found mosquitto static library at: {$lib}\n";
 
                 // 确保在标准位置也有库文件
@@ -178,19 +222,39 @@ trait libmosquitto
                     echo "[I] Copied to {$lib_dir}/libmosquitto.a\n";
                 }
 
-                if (!file_exists($buildroot_lib . '/libmosquitto.a') && is_dir($buildroot_lib)) {
-                    copy($lib, $buildroot_lib . '/libmosquitto.a');
-                    echo "[I] Copied to {$buildroot_lib}/libmosquitto.a\n";
+                if (!file_exists($lib_dir . '/libmosquitto_static.a')) {
+                    copy($lib, $lib_dir . '/libmosquitto_static.a');
+                    echo "[I] Copied to {$lib_dir}/libmosquitto_static.a\n";
                 }
 
                 $found = true;
-                break;
             }
         }
 
         if (!$found) {
-            throw new \RuntimeException('No mosquitto static library found!');
+            // 最后尝试使用 find 命令搜索
+            echo "[I] Attempting to find with find command...\n";
+            $find_result = shell()->cd($work_dir)
+                ->exec("find . -name 'libmosquitto*.a' -type f 2>/dev/null")
+                ->getOutput();
+
+            if (!empty($find_result)) {
+                echo "[I] Find results:\n" . $find_result . "\n";
+                $first_found = trim(explode("\n", $find_result)[0]);
+                if (file_exists($first_found)) {
+                    copy($first_found, $lib_dir . '/libmosquitto.a');
+                    copy($first_found, $lib_dir . '/libmosquitto_static.a');
+                    echo "[I] Copied from {$first_found}\n";
+                    $found = true;
+                }
+            }
         }
+
+        if (!$found) {
+            throw new \RuntimeException('No mosquitto static library found after all attempts!');
+        }
+
+        echo "[I] ===== DEBUG END =====\n";
     }
 
     protected function copyHeaderFiles(): void
