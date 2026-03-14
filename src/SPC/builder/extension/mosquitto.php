@@ -271,37 +271,7 @@ EOF;
 
 
 
-    /**
-     * 修补主源文件
-     */
-    protected function patchSourceFile(): void
-    {
-        $source_file = $this->source_dir . '/mosquitto.c';
-        if (!file_exists($source_file)) {
-            return;
-        }
 
-        $content = file_get_contents($source_file);
-        $original = $content;
-
-        // 移除所有 TSRMLS_CC
-        $content = str_replace(' TSRMLS_CC', '', $content);
-        $content = str_replace('TSRMLS_CC', '', $content);
-
-        // 修复 REGISTER_MOSQUITTO_LONG_CONST 宏
-        $pattern = '/#define\s+REGISTER_MOSQUITTO_LONG_CONST\(\s*const_name\s*,\s*value\s*\)(.*?)(?=\n\S)/s';
-        $replacement = <<<'EOF'
-#define REGISTER_MOSQUITTO_LONG_CONST(const_name, value) \
-    zend_declare_class_constant_long(mosquitto_ce_client, const_name, sizeof(const_name)-1, (long)value)
-EOF;
-
-        $content = preg_replace($pattern, $replacement, $content);
-
-        if ($content !== $original) {
-            file_put_contents($source_file, $content);
-            echo "[I] Patched mosquitto.c\n";
-        }
-    }
 
     /**
      * 为 PHP 8.2 打完整的兼容性补丁
