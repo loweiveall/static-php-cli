@@ -250,35 +250,6 @@ EOF;
         }
     }
 
-    /**
-     * 为 PHP 8.2 打补丁
-     */
-    protected function patchForPHP82(): void
-    {
-        $source_file = $this->source_dir . '/mosquitto.c';
-        if (!file_exists($source_file)) {
-            return;
-        }
-
-        $content = file_get_contents($source_file);
-        $original = $content;
-
-        // 移除 TSRMLS_CC
-        $content = preg_replace(
-            '/zend_declare_class_constant_long\(([^,]+), ([^,]+), ([^,]+), ([^)]+)\) TSRMLS_CC;/',
-            'zend_declare_class_constant_long($1, $2, $3, $4);',
-            $content
-        );
-
-        $content = str_replace(' TSRMLS_CC', '', $content);
-        $content = str_replace('TSRMLS_CC', '', $content);
-
-        if ($content !== $original) {
-            file_put_contents($source_file, $content);
-            echo "[I] Applied PHP 8.2 compatibility patch\n";
-        }
-    }
-
     public function getUnixConfigureArg(bool $shared = false): string
     {
         // 设置环境变量
@@ -295,5 +266,161 @@ EOF;
     public function getWindowsConfigureArg($shared = false): string
     {
         return '--with-mosquitto';
+    }
+
+    /**
+     * 为 PHP 8.2 打完整的兼容性补丁
+     */
+    protected function patchForPHP82(): void
+    {
+        echo "[I] Applying comprehensive PHP 8.2 compatibility patches...\n";
+
+        // 1. 修改 php_mosquitto.h
+        $this->patchHeaderFile();
+
+        // 2. 修改 mosquitto.c
+        $this->patchSourceFile();
+
+        // 3. 修改 mosquitto_message.c
+        $this->patchMessageFile();
+
+        // 4. 修改 mosquitto_client.c
+        $this->patchClientFile();
+    }
+
+    /**
+     * 修补头文件
+     */
+    protected function patchHeaderFile(): void
+    {
+        $header_file = $this->source_dir . '/php_mosquitto.h';
+        if (!file_exists($header_file)) {
+            return;
+        }
+
+        $content = file_get_contents($header_file);
+        $original = $content;
+
+        // 添加缺失的类型定义
+        $type_definitions = <<<'EOF'
+#ifndef PHP_MOSQUITTO_TYPES_DEFINED
+#define PHP_MOSQUITTO_TYPES_DEFINED
+
+/* Define callback types for PHP 8.2 compatibility */
+typedef void (*php_mosquitto_read_t)(void);
+typedef void (*php_mosquitto_write_t)(void);
+
+#endif
+
+EOF;
+
+        // 在文件开头添加类型定义
+        if (strpos($content, 'php_mosquitto_write_t') === false) {
+            $content = $type_definitions . "\n" . $content;
+        }
+
+        // 移除所有 TSRMLS_CC
+        $content = str_replace(' TSRMLS_CC', '', $content);
+        $content = str_replace('TSRMLS_CC', '', $content);
+        $content = str_replace(' TSRMLS_DC', '', $content);
+        $content = str_replace('TSRMLS_DC', '', $content);
+
+        // 修复 PHP_MOSQUITTO_ADD_PROPERTIES 宏
+        $pattern = '/#define\s+PHP_MOSQUITTO_ADD_PROPERTIES\(\s*\(a\)\s*,\s*\(b\)\s*\)(.*?)(?=\n\S)/s';
+        $replacement = <<<'EOF'
+#define PHP_MOSQUITTO_ADD_PROPERTIES(a, b) \
+    do { \
+        int i; \
+        for (i = 0; (b)[i].name != NULL; i++) { \
+            php_mosquitto_message_add_property((a), (b)[i].name, (b)[i].name_length, \
+                (php_mosquitto_read_t)(b)[i].read_func, (php_mosquitto_write_t)(b)[i].write_func); \
+        } \
+    } while(0)
+EOF;
+
+        $content = preg_replace($pattern, $replacement, $content);
+
+        if ($content !== $original) {
+            file_put_contents($header_file, $content);
+            echo "[I] Patched php_mosquitto.h\n";
+        }
+    }
+
+    /**
+     * 修补主源文件
+     */
+    protected function patchSourceFile(): void
+    {
+        $source_file = $this->source_dir . '/mosquitto.c';
+        if (!file_exists($source_file)) {
+            return;
+        }
+
+        $content = file_get_contents($source_file);
+        $original = $content;
+
+        // 移除所有 TSRMLS_CC
+        $content = str_replace(' TSRMLS_CC', '', $content);
+        $content = str_replace('TSRMLS_CC', '', $content);
+
+        // 修复 REGISTER_MOSQUITTO_LONG_CONST 宏
+        $pattern = '/#define\s+REGISTER_MOSQUITTO_LONG_CONST\(\s*const_name\s*,\s*value\s*\)(.*?)(?=\n\S)/s';
+        $replacement = <<<'EOF'
+#define REGISTER_MOSQUITTO_LONG_CONST(const_name, value) \
+    zend_declare_class_constant_long(mosquitto_ce_client, const_name, sizeof(const_name)-1, (long)value)
+EOF;
+
+        $content = preg_replace($pattern, $replacement, $content);
+
+        if ($content !== $original) {
+            file_put_contents($source_file, $content);
+            echo "[I] Patched mosquitto.c\n";
+        }
+    }
+
+    /**
+     * 修补消息文件
+     */
+    protected function patchMessageFile(): void
+    {
+        $message_file = $this->source_dir . '/mosquitto_message.c';
+        if (!file_exists($message_file)) {
+            return;
+        }
+
+        $content = file_get_contents($message_file);
+        $original = $content;
+
+        // 移除所有 TSRMLS_CC
+        $content = str_replace(' TSRMLS_CC', '', $content);
+        $content = str_replace('TSRMLS_CC', '', $content);
+
+        if ($content !== $original) {
+            file_put_contents($message_file, $content);
+            echo "[I] Patched mosquitto_message.c\n";
+        }
+    }
+
+    /**
+     * 修补客户端文件
+     */
+    protected function patchClientFile(): void
+    {
+        $client_file = $this->source_dir . '/mosquitto_client.c';
+        if (!file_exists($client_file)) {
+            return;
+        }
+
+        $content = file_get_contents($client_file);
+        $original = $content;
+
+        // 移除所有 TSRMLS_CC
+        $content = str_replace(' TSRMLS_CC', '', $content);
+        $content = str_replace('TSRMLS_CC', '', $content);
+
+        if ($content !== $original) {
+            file_put_contents($client_file, $content);
+            echo "[I] Patched mosquitto_client.c\n";
+        }
     }
 }
