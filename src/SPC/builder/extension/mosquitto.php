@@ -13,8 +13,8 @@ class mosquitto extends Extension
 {
     public function patchBeforeConfigure(): bool
     {
-        // 在 configure 之前执行，确保修改生效
-        $this->forceConfigurePatch();
+        // 在 configure 之前执行，确保头文件路径正确
+        $this->setupHeaderFiles();
         return true;
     }
 
@@ -33,99 +33,62 @@ class mosquitto extends Extension
     }
 
     /**
-     * 强制修改 configure 文件
+     * 设置头文件，确保 mosquitto 头文件能被找到
      */
-    protected function forceConfigurePatch(): void
+    protected function setupHeaderFiles(): void
     {
         $work_dir = $this->builder->getOption('work_dir');
-        $configure_file = $this->source_dir . '/configure';
-        $config_m4 = $this->source_dir . '/config.m4';
+        $buildroot_include = $work_dir . '/buildroot/include';
 
-        // 方法1: 直接修改 configure 文件（最可靠）
-        if (file_exists($configure_file)) {
-            $content = file_get_contents($configure_file);
-
-            // 在文件中插入我们的路径检查
-            $search = 'if test "$PHP_MOSQUITTO" != "no"; then';
-            $replace = $search . "\n\n" . <<<EOF
-  dnl 直接设置路径
-  MOSQUITTO_LIBDIR={$work_dir}/buildroot/lib
-  MOSQUITTO_INCDIR={$work_dir}/buildroot/include
-
-  dnl 添加头文件路径
-  CPPFLAGS="\$CPPFLAGS -I\$MOSQUITTO_INCDIR"
-  LDFLAGS="\$LDFLAGS -L\$MOSQUITTO_LIBDIR"
-
-  dnl 检查库是否存在
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for mosquitto library" >&5
-  $as_echo_n "checking for mosquitto library... " >&6; }
-  if test -f "\$MOSQUITTO_LIBDIR/libmosquitto.a"; then
-    { $as_echo "$as_me:${as_lineno-$LINENO}: result: found" >&5
-  $as_echo "found" >&6; }
-    MOSQUITTO_LIBS="-L\$MOSQUITTO_LIBDIR -lmosquitto"
-  else
-    { $as_echo "$as_me:${as_lineno-$LINENO}: result: not found" >&5
-  $as_echo "not found" >&6; }
-    as_fn_error \$? "Please reinstall the mosquitto distribution" "$LINENO" 5
-  fi
-
-EOF;
-
-            $content = str_replace($search, $replace, $content);
-            file_put_contents($configure_file, $content);
-            echo "[I] Patched configure file directly\n";
+        // 1. 创建 mosquitto 子目录
+        if (!is_dir('/usr/local/include/mosquitto')) {
+            mkdir('/usr/local/include/mosquitto', 0755, true);
         }
 
-        // 方法2: 同时修改 config.m4 作为备份
-        if (file_exists($config_m4)) {
-            $new_config = <<<EOF
-dnl config.m4 for mosquitto extension
+        // 2. 复制所有 mosquitto 头文件到 /usr/local/include/mosquitto/
+        $mosquitto_headers = [
+            'mosquitto.h',
+            'mosquitto_broker.h',
+            'mosquitto_plugin.h',
+            'mosquittopp.h',
+            'mqtt_protocol.h',
+        ];
 
-PHP_ARG_WITH(mosquitto, for mosquitto support,
-[  --with-mosquitto             Include mosquitto support])
+        foreach ($mosquitto_headers as $header) {
+            $source = $buildroot_include . '/' . $header;
+            $target = '/usr/local/include/' . $header;
+            $target_subdir = '/usr/local/include/mosquitto/' . $header;
 
-if test "\$PHP_MOSQUITTO" != "no"; then
-  MOSQUITTO_LIBDIR={$work_dir}/buildroot/lib
-  MOSQUITTO_INCDIR={$work_dir}/buildroot/include
-
-  PHP_ADD_INCLUDE(\$MOSQUITTO_INCDIR)
-  PHP_ADD_LIBRARY_WITH_PATH(mosquitto, \$MOSQUITTO_LIBDIR, MOSQUITTO_SHARED_LIBADD)
-
-  PHP_CHECK_LIBRARY(mosquitto, mosquitto_lib_version, [
-    AC_DEFINE(HAVE_MOSQUITTO, 1, [ ])
-  ], [
-    AC_MSG_ERROR([mosquitto library not found. Please install libmosquitto])
-  ], [
-    -L\$MOSQUITTO_LIBDIR
-  ])
-
-  PHP_NEW_EXTENSION(mosquitto, mosquitto.c, \$ext_shared)
-  PHP_SUBST(MOSQUITTO_SHARED_LIBADD)
-fi
-EOF;
-            file_put_contents($config_m4, $new_config);
-            echo "[I] Rewrote config.m4\n";
+            if (file_exists($source)) {
+                // 复制到根目录
+                copy($source, $target);
+                // 复制到 mosquitto 子目录
+                copy($source, $target_subdir);
+                echo "[I] Copied {$header} to /usr/local/include/ and /usr/local/include/mosquitto/\n";
+            }
         }
 
-        // 方法3: 创建符号链接，让库在默认路径也能找到
-        if (!file_exists('/usr/local/lib/libmosquitto.a')) {
-            @mkdir('/usr/local/lib', 0755, true);
-            @mkdir('/usr/local/include', 0755, true);
-            shell()->exec("ln -sf {$work_dir}/buildroot/lib/libmosquitto.a /usr/local/lib/ 2>/dev/null || true");
-            shell()->exec("ln -sf {$work_dir}/buildroot/include/mosquitto.h /usr/local/include/ 2>/dev/null || true");
-            echo "[I] Created symlinks in /usr/local\n";
+        // 3. 复制 cJSON 头文件
+        if (file_exists($buildroot_include . '/cJSON.h')) {
+            copy($buildroot_include . '/cJSON.h', '/usr/local/include/cJSON.h');
         }
+
+        // 4. 设置编译环境变量
+        putenv("CFLAGS=-I/usr/local/include -I{$buildroot_include}");
+        putenv("CPPFLAGS=-I/usr/local/include -I{$buildroot_include}");
+
+        echo "[I] Set CFLAGS/CPPFLAGS to include /usr/local/include and {$buildroot_include}\n";
     }
 
     public function getUnixConfigureArg(bool $shared = false): string
     {
-        // 设置环境变量
         $work_dir = $this->builder->getOption('work_dir');
 
+        // 设置环境变量
         putenv("PKG_CONFIG_PATH={$work_dir}/buildroot/lib/pkgconfig");
-        putenv("CPPFLAGS=-I{$work_dir}/buildroot/include");
+        putenv("CFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include");
+        putenv("CPPFLAGS=-I/usr/local/include -I{$work_dir}/buildroot/include");
         putenv("LDFLAGS=-L{$work_dir}/buildroot/lib");
-        putenv("CFLAGS=-I{$work_dir}/buildroot/include");
 
         return '--with-mosquitto' . ($shared ? '=shared' : '');
     }

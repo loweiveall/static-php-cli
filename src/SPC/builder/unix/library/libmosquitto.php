@@ -183,9 +183,6 @@ trait libmosquitto
         }
     }
 
-    /**
-     * 复制头文件
-     */
     protected function copyHeaderFiles(): void
     {
         $work_dir = $this->builder->getOption('work_dir');
@@ -204,6 +201,35 @@ trait libmosquitto
         $install_include = $work_dir . '/buildroot/include';
         if (is_dir($install_include)) {
             FileSystem::copyDir($install_include, BUILD_INCLUDE_PATH);
+        }
+
+        // 新增：确保 mqtt_protocol.h 在正确的位置
+        $mqtt_protocol_sources = [
+            $this->source_dir . '/include/mqtt_protocol.h',
+            $work_dir . '/buildroot/include/mqtt_protocol.h',
+            $this->source_dir . '/lib/mqtt_protocol.h',
+        ];
+
+        foreach ($mqtt_protocol_sources as $source) {
+            if (file_exists($source)) {
+                copy($source, BUILD_INCLUDE_PATH . '/mqtt_protocol.h');
+                echo "[I] Copied mqtt_protocol.h from {$source}\n";
+                break;
+            }
+        }
+
+        // 创建 mosquitto 子目录并复制头文件
+        if (!is_dir(BUILD_INCLUDE_PATH . '/mosquitto')) {
+            mkdir(BUILD_INCLUDE_PATH . '/mosquitto', 0755, true);
+        }
+
+        // 复制所有头文件到 mosquitto 子目录
+        $headers = glob(BUILD_INCLUDE_PATH . '/*.h');
+        foreach ($headers as $header) {
+            $basename = basename($header);
+            if (!file_exists(BUILD_INCLUDE_PATH . '/mosquitto/' . $basename)) {
+                copy($header, BUILD_INCLUDE_PATH . '/mosquitto/' . $basename);
+            }
         }
     }
 
