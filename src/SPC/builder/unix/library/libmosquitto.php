@@ -54,11 +54,30 @@ trait libmosquitto
             ->exec("make -j{$this->builder->concurrency}")
             ->exec('make install');
 
+        // 确保库文件存在
+        $this->ensureLibraryFiles();
+
         // 复制头文件
         $this->copyHeaderFiles();
 
         // 生成pkg-config文件
         $this->patchPkgconf();
+    }
+
+    protected function ensureLibraryFiles(): void
+    {
+        $lib_dir = BUILD_LIB_PATH;
+
+        // 如果生成了 libmosquitto_static.a 但没有 libmosquitto.a，创建符号链接
+        if (file_exists($lib_dir . '/libmosquitto_static.a') && !file_exists($lib_dir . '/libmosquitto.a')) {
+            shell()->exec("ln -sf {$lib_dir}/libmosquitto_static.a {$lib_dir}/libmosquitto.a");
+            echo "[I] Created symlink: libmosquitto.a -> libmosquitto_static.a\n";
+        }
+
+        // 如果两个都不存在，报错
+        if (!file_exists($lib_dir . '/libmosquitto.a') && !file_exists($lib_dir . '/libmosquitto_static.a')) {
+            throw new \RuntimeException('No mosquitto static library found!');
+        }
     }
 
     /**
