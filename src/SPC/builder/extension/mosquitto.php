@@ -268,83 +268,8 @@ EOF;
         return '--with-mosquitto';
     }
 
-    /**
-     * 为 PHP 8.2 打完整的兼容性补丁
-     */
-    protected function patchForPHP82(): void
-    {
-        echo "[I] Applying comprehensive PHP 8.2 compatibility patches...\n";
 
-        // 1. 修改 php_mosquitto.h
-        $this->patchHeaderFile();
 
-        // 2. 修改 mosquitto.c
-        $this->patchSourceFile();
-
-        // 3. 修改 mosquitto_message.c
-        $this->patchMessageFile();
-
-        // 4. 修改 mosquitto_client.c
-        $this->patchClientFile();
-    }
-
-    /**
-     * 修补头文件
-     */
-    protected function patchHeaderFile(): void
-    {
-        $header_file = $this->source_dir . '/php_mosquitto.h';
-        if (!file_exists($header_file)) {
-            return;
-        }
-
-        $content = file_get_contents($header_file);
-        $original = $content;
-
-        // 添加缺失的类型定义
-        $type_definitions = <<<'EOF'
-#ifndef PHP_MOSQUITTO_TYPES_DEFINED
-#define PHP_MOSQUITTO_TYPES_DEFINED
-
-/* Define callback types for PHP 8.2 compatibility */
-typedef void (*php_mosquitto_read_t)(void);
-typedef void (*php_mosquitto_write_t)(void);
-
-#endif
-
-EOF;
-
-        // 在文件开头添加类型定义
-        if (strpos($content, 'php_mosquitto_write_t') === false) {
-            $content = $type_definitions . "\n" . $content;
-        }
-
-        // 移除所有 TSRMLS_CC
-        $content = str_replace(' TSRMLS_CC', '', $content);
-        $content = str_replace('TSRMLS_CC', '', $content);
-        $content = str_replace(' TSRMLS_DC', '', $content);
-        $content = str_replace('TSRMLS_DC', '', $content);
-
-        // 修复 PHP_MOSQUITTO_ADD_PROPERTIES 宏
-        $pattern = '/#define\s+PHP_MOSQUITTO_ADD_PROPERTIES\(\s*\(a\)\s*,\s*\(b\)\s*\)(.*?)(?=\n\S)/s';
-        $replacement = <<<'EOF'
-#define PHP_MOSQUITTO_ADD_PROPERTIES(a, b) \
-    do { \
-        int i; \
-        for (i = 0; (b)[i].name != NULL; i++) { \
-            php_mosquitto_message_add_property((a), (b)[i].name, (b)[i].name_length, \
-                (php_mosquitto_read_t)(b)[i].read_func, (php_mosquitto_write_t)(b)[i].write_func); \
-        } \
-    } while(0)
-EOF;
-
-        $content = preg_replace($pattern, $replacement, $content);
-
-        if ($content !== $original) {
-            file_put_contents($header_file, $content);
-            echo "[I] Patched php_mosquitto.h\n";
-        }
-    }
 
     /**
      * 修补主源文件
@@ -379,6 +304,117 @@ EOF;
     }
 
     /**
+     * 为 PHP 8.2 打完整的兼容性补丁
+     */
+    protected function patchForPHP82(): void
+    {
+        echo "[I] Applying comprehensive PHP 8.2 compatibility patches...\n";
+
+        // 1. 修改头文件
+        $this->patchHeaderFile();
+
+        // 2. 修改消息文件（最需要修复的）
+        $this->patchMessageFile();
+
+        // 3. 修改其他源文件
+        $this->patchSourceFile();
+        $this->patchClientFile();
+    }
+
+    /**
+     * 修补头文件
+     */
+    protected function patchHeaderFile(): void
+    {
+        $header_file = $this->source_dir . '/php_mosquitto.h';
+        if (!file_exists($header_file)) {
+            return;
+        }
+
+        $content = file_get_contents($header_file);
+        $original = $content;
+
+        // 添加必要的类型定义和宏
+        $additions = <<<'EOF'
+/* PHP 8.2 compatibility definitions */
+#ifndef PHP_MOSQUITTO_COMPAT
+#define PHP_MOSQUITTO_COMPAT
+
+/* Define callback types */
+typedef void (*php_mosquitto_read_t)(void);
+typedef void (*php_mosquitto_write_t)(void);
+
+/* PHP 8.2 object handler signatures */
+#if PHP_VERSION_ID >= 80200
+#define MOSQUITTO_READ_PROPERTY(name) \
+    zval *name(zend_object *object, zend_string *member, int type, void **cache_slot, zval *rv)
+#define MOSQUITTO_WRITE_PROPERTY(name) \
+    zval *name(zend_object *object, zend_string *member, zval *value, void **cache_slot)
+#define MOSQUITTO_HAS_PROPERTY(name) \
+    int name(zend_object *object, zend_string *member, int has_set_exists, void **cache_slot)
+#define MOSQUITTO_GET_PROPERTIES(name) \
+    HashTable *name(zend_object *object)
+#define MOSQUITTO_FREE_OBJ(name) \
+    void name(zend_object *object)
+#else
+#define MOSQUITTO_READ_PROPERTY(name) \
+    zval *name(zval *object, zval *member, int type, void **cache_slot, zval *rv)
+#define MOSQUITTO_WRITE_PROPERTY(name) \
+    void name(zval *object, zval *member, zval *value, void **cache_slot)
+#define MOSQUITTO_HAS_PROPERTY(name) \
+    int name(zval *object, zval *member, int has_set_exists, void **cache_slot)
+#define MOSQUITTO_GET_PROPERTIES(name) \
+    HashTable *name(zval *object)
+#define MOSQUITTO_FREE_OBJ(name) \
+    void name(zend_object *object)
+#endif
+
+#endif
+
+EOF;
+
+        // 在文件开头添加兼容性定义
+        if (strpos($content, 'PHP_MOSQUITTO_COMPAT') === false) {
+            $content = $additions . "\n" . $content;
+        }
+
+        // 修复 PHP_MOSQUITTO_ADD_PROPERTIES 宏
+        $pattern = '/#define\s+PHP_MOSQUITTO_ADD_PROPERTIES\(\s*\(a\)\s*,\s*\(b\)\s*\)(.*?)(?=\n\S)/s';
+        $replacement = <<<'EOF'
+#define PHP_MOSQUITTO_ADD_PROPERTIES(a, b) \
+    do { \
+        int i; \
+        for (i = 0; (b)[i].name != NULL; i++) { \
+            php_mosquitto_message_add_property((a), (b)[i].name, (b)[i].name_length, \
+                (php_mosquitto_read_t)(b)[i].read_func, (php_mosquitto_write_t)(b)[i].write_func); \
+        } \
+    } while(0)
+EOF;
+
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 添加函数声明
+        $func_decls = <<<'EOF'
+
+/* PHP 8.2 compatible function declarations */
+MOSQUITTO_READ_PROPERTY(php_mosquitto_message_read_property);
+MOSQUITTO_WRITE_PROPERTY(php_mosquitto_message_write_property);
+MOSQUITTO_HAS_PROPERTY(php_mosquitto_message_has_property);
+MOSQUITTO_GET_PROPERTIES(php_mosquitto_message_get_properties);
+MOSQUITTO_FREE_OBJ(mosquitto_message_object_destroy);
+
+EOF;
+
+        // 在文件末尾添加函数声明
+        $content .= $func_decls;
+
+        if ($content !== $original) {
+            file_put_contents($header_file, $content);
+            echo "[I] Patched php_mosquitto.h\n";
+        }
+    }
+
+    /**
      * 修补消息文件
      */
     protected function patchMessageFile(): void
@@ -391,13 +427,93 @@ EOF;
         $content = file_get_contents($message_file);
         $original = $content;
 
-        // 移除所有 TSRMLS_CC
-        $content = str_replace(' TSRMLS_CC', '', $content);
-        $content = str_replace('TSRMLS_CC', '', $content);
+        // 替换 read_property 函数签名
+        $pattern = '/zval \*php_mosquitto_message_read_property\(zval \*object, zval \*member, int type, void \*\*cache_slot, zval \*rv\)/';
+        $replacement = 'MOSQUITTO_READ_PROPERTY(php_mosquitto_message_read_property)';
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 替换 write_property 函数签名
+        $pattern = '/void php_mosquitto_message_write_property\(zval \*object, zval \*member, zval \*value, void \*\*cache_slot\)/';
+        $replacement = 'MOSQUITTO_WRITE_PROPERTY(php_mosquitto_message_write_property)';
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 替换 has_property 函数签名
+        $pattern = '/int php_mosquitto_message_has_property\(zval \*object, zval \*member, int has_set_exists, void \*\*cache_slot\)/';
+        $replacement = 'MOSQUITTO_HAS_PROPERTY(php_mosquitto_message_has_property)';
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 替换 get_properties 函数签名
+        $pattern = '/HashTable \*php_mosquitto_message_get_properties\(zval \*object\)/';
+        $replacement = 'MOSQUITTO_GET_PROPERTIES(php_mosquitto_message_get_properties)';
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 替换 destroy 函数签名
+        $pattern = '/static void mosquitto_message_object_destroy\(zend_object \*object\)/';
+        $replacement = 'MOSQUITTO_FREE_OBJ(mosquitto_message_object_destroy)';
+        $content = preg_replace($pattern, $replacement, $content);
+
+        // 修复函数体内的参数使用
+        // read_property 函数内
+        $content = str_replace(
+            'if (Z_TYPE_P(member) != IS_STRING) {',
+            '#if PHP_VERSION_ID < 80200
+    if (Z_TYPE_P(member) != IS_STRING) {
+#else
+    if (member == NULL) {
+#endif',
+            $content
+        );
+
+        // 将函数体内的 object 参数从 zval* 转换为 zend_object*
+        $content = preg_replace(
+            '/php_mosquitto_message_obj = \(php_mosquitto_message_object \*\)\(\(\(char \*\)\(object\)\) - XtOffsetOf\(php_mosquitto_message_object, zo\)\);/',
+            '#if PHP_VERSION_ID >= 80200
+    php_mosquitto_message_obj = (php_mosquitto_message_object *)((char *)(object) - XtOffsetOf(php_mosquitto_message_object, zo));
+#else
+    php_mosquitto_message_obj = (php_mosquitto_message_object *)((char *)(object) - XtOffsetOf(php_mosquitto_message_object, zo));
+#endif',
+            $content
+        );
+
+        // 在文件开头添加条件编译
+        $includes = "#if PHP_VERSION_ID >= 80200\n#include \"Zend/zend_types.h\"\n#endif\n\n";
+        $content = preg_replace('/#include "php_mosquitto.h"/', "#include \"php_mosquitto.h\"\n" . $includes, $content);
 
         if ($content !== $original) {
             file_put_contents($message_file, $content);
             echo "[I] Patched mosquitto_message.c\n";
+        }
+    }
+
+    /**
+     * 修补主源文件
+     */
+    protected function patchSourceFile(): void
+    {
+        $source_file = $this->source_dir . '/mosquitto.c';
+        if (!file_exists($source_file)) {
+            return;
+        }
+
+        $content = file_get_contents($source_file);
+        $original = $content;
+
+        // 移除所有 TSRMLS_CC
+        $content = str_replace(' TSRMLS_CC', '', $content);
+        $content = str_replace('TSRMLS_CC', '', $content);
+
+        // 修复 REGISTER_MOSQUITTO_LONG_CONST 宏
+        $pattern = '/#define\s+REGISTER_MOSQUITTO_LONG_CONST\(\s*const_name\s*,\s*value\s*\)(.*?)(?=\n\S)/s';
+        $replacement = <<<'EOF'
+#define REGISTER_MOSQUITTO_LONG_CONST(const_name, value) \
+    zend_declare_class_constant_long(mosquitto_ce_client, const_name, sizeof(const_name)-1, (long)value)
+EOF;
+
+        $content = preg_replace($pattern, $replacement, $content);
+
+        if ($content !== $original) {
+            file_put_contents($source_file, $content);
+            echo "[I] Patched mosquitto.c\n";
         }
     }
 
