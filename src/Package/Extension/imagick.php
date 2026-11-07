@@ -24,6 +24,25 @@ class imagick extends PhpExtensionPackage
         return '--with-imagick=' . ($shared ? 'shared,' : '') . $builder->getBuildRootPath() . $disable_omp;
     }
 
+    #[BeforeStage('php', [php::class, 'buildconfForUnix'], 'ext-imagick')]
+    #[PatchDescription('Skip imagick >= 3.8 php-config lookup: in-tree static builds have no php-config')]
+    public function patchPhpVersionCheckForUnix(): void
+    {
+        $config = $this->getBuildDir() . '/config.m4';
+        $content = FileSystem::readFile($config);
+        $needle = 'if test -z "${PHP_VERSION_ID}"; then';
+        // Older imagick releases do not contain this check; already-patched sources are idempotent.
+        if (!str_contains($content, $needle)) {
+            return;
+        }
+        $version_id = (int) php::getPHPVersionID();
+        $version = intdiv($version_id, 10000) . '.' . intdiv($version_id % 10000, 100) . '.' . ($version_id % 100);
+        // Force the "PHP_VERSION_ID is known" branch instead of querying php-config.
+        FileSystem::replaceFileStr($config, $needle, 'if false; then');
+        FileSystem::replaceFileStr($config, 'PHP_IMAGICK_FOUND_VERNUM="${PHP_VERSION_ID}"', "PHP_IMAGICK_FOUND_VERNUM={$version_id}");
+        FileSystem::replaceFileStr($config, 'PHP_IMAGICK_FOUND_VERSION="${PHP_VERSION}"', "PHP_IMAGICK_FOUND_VERSION=\"{$version}\"");
+    }
+
     #[CustomPhpConfigureArg('Windows')]
     public function getWindowsConfigureArg(bool $shared): string
     {
