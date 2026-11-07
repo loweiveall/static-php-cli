@@ -1,0 +1,21 @@
+libmosquitto:
+  type: library
+  artifact:
+    source:
+      type: ghtagtar
+      repo: eclipse-mosquitto/mosquitto
+      match: v2\.0\.\d+$
+      prefer-stable: true
+    metadata:
+      license-files: [LICENSE.txt]
+      license: 'EPL-2.0 OR EDL-1.0'
+  depends:
+    - openssl
+  description: 'Eclipse Mosquitto MQTT client library'
+  headers:
+    - mosquitto.h
+    - mqtt_protocol.h
+  pkg-configs:
+    - libmosquitto
+  static-libs@unix:
+    - libmosquitto.a

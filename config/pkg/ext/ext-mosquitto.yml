@@ -1,0 +1,19 @@
+ext-mosquitto:
+  type: php-extension
+  artifact:
+    source:
+      type: ghtagtar
+      repo: ryco-dev/php-mosquitto
+      match: 0\.5\.\d+$
+      prefer-stable: true
+    metadata:
+      license-files: [LICENSE]
+      license: BSD-3-Clause
+  depends:
+    - libmosquitto
+  description: 'Mosquitto MQTT client extension (Mosquitto\Client)'
+  php-extension:
+    os:
+      - Linux
+      - Darwin
+    arg-type: with-path
