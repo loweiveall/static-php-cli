@@ -1,0 +1,21 @@
+POSIX strerror_r() returns int while the GNU variant returns char*.
+Building against musl (or any POSIX libc) with a compiler that promotes
+-Wint-conversion to an error (zig cc / clang 20, gcc 14) fails with:
+  error: incompatible integer to pointer conversion assigning to 'char *' from 'int'
+Only the filled buffer is used, so the return value is simply discarded.
+
+--- a/mosquitto.c
++++ b/mosquitto.c
+@@ -888,8 +888,10 @@
+ 
+ PHP_MOSQUITTO_API char *php_mosquitto_strerror_wrapper(int err)
+ {
+-	char *ret, *buf = ecalloc(256, sizeof(char));
+-	ret = strerror_r(err, buf, 256);
++	char *buf = ecalloc(256, sizeof(char));
++	/* strerror_r() returns char* on GNU libc but int on POSIX (musl, macOS).
++	 * Only the filled buffer is used, so the return value is discarded. */
++	(void) strerror_r(err, buf, 256);
+ 	if (!buf[0]) {
+ 		efree(buf);
+ 		return NULL;
