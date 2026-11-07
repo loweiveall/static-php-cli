@@ -18,18 +18,10 @@ ext-swoole:
   suggests:
     - zstd
     - ext-sockets
-    - ext-swoole-hook-pgsql
-    - ext-swoole-hook-mysql
-    - ext-swoole-hook-sqlite
-    - ext-swoole-hook-odbc
   suggests@linux:
     - zstd
     - liburing
     - ext-sockets
-    - ext-swoole-hook-pgsql
-    - ext-swoole-hook-mysql
-    - ext-swoole-hook-sqlite
-    - ext-swoole-hook-odbc
   lang: cpp
   php-extension:
     os:
