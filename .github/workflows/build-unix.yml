@@ -155,13 +155,15 @@ jobs:
               RUNS_ON="ubuntu-24.04-arm"
               ;;
             linux-x86_64-glibc)
-              DOWN_CMD="./bin/spc-gnu-docker download"
-              BUILD_CMD="./bin/spc-gnu-docker build"
+              GLIBC_TARGET="x86_64-linux-gnu.2.17"
+              DOWN_CMD="composer install --no-dev --classmap-authoritative && ./bin/spc doctor --auto-fix && SPC_TARGET=$GLIBC_TARGET ./bin/spc download"
+              BUILD_CMD="SPC_TARGET=$GLIBC_TARGET ./bin/spc build"
               RUNS_ON="ubuntu-22.04"
               ;;
             linux-aarch64-glibc)
-              DOWN_CMD="./bin/spc-gnu-docker download"
-              BUILD_CMD="./bin/spc-gnu-docker build"
+              GLIBC_TARGET="aarch64-linux-gnu.2.17"
+              DOWN_CMD="composer install --no-dev --classmap-authoritative && ./bin/spc doctor --auto-fix && SPC_TARGET=$GLIBC_TARGET ./bin/spc download"
+              BUILD_CMD="SPC_TARGET=$GLIBC_TARGET ./bin/spc build"
               RUNS_ON="ubuntu-22.04-arm"
               ;;
             macos-x86_64)
@@ -247,7 +249,8 @@ jobs:
               ./bin/spc-alpine-docker install-pkg go-xcaddy
               ;;
             linux-x86_64-glibc|linux-aarch64-glibc)
-              ./bin/spc-gnu-docker install-pkg go-xcaddy
+              composer install --no-dev --classmap-authoritative
+              ./bin/spc install-pkg go-xcaddy
               ;;
             macos-x86_64|macos-aarch64)
               composer update --no-dev --classmap-authoritative
