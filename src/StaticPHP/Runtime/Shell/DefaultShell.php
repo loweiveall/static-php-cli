@@ -40,9 +40,9 @@ class DefaultShell extends Shell
             default => "-X {$method}",
         };
         $header_arg = implode(' ', array_map(fn ($v) => '"-H' . $v . '"', $headers));
-        $retry_arg = $retries > 0 ? "--retry {$retries}" : '';
+        $retry_arg = self::curlRetryArgs($retries);
         $compressed_arg = $compressed ? '--compressed' : '';
-        $cmd = SPC_CURL_EXEC . " -sfSL --max-time 3600 {$retry_arg} {$compressed_arg} {$method_arg} {$header_arg} {$url_arg}";
+        $cmd = SPC_CURL_EXEC . " -sfSL --connect-timeout 15 --speed-limit 1 --speed-time 30 --max-time 3600 {$retry_arg} {$compressed_arg} {$method_arg} {$header_arg} {$url_arg}";
 
         $this->logCommandInfo($cmd);
         logger()->debug("[CURL EXECUTE] {$cmd}");
@@ -74,9 +74,9 @@ class DefaultShell extends Shell
         $path_arg = escapeshellarg($path);
 
         $header_arg = implode(' ', array_map(fn ($v) => '"-H' . $v . '"', $headers));
-        $retry_arg = $retries > 0 ? "--retry {$retries}" : '';
+        $retry_arg = self::curlRetryArgs($retries);
         $check = $this->console_putput ? '#' : 's';
-        $cmd = clean_spaces(SPC_CURL_EXEC . " -{$check}fSL --max-time 3600 {$retry_arg} {$header_arg} -o {$path_arg} {$url_arg}");
+        $cmd = clean_spaces(SPC_CURL_EXEC . " -{$check}fSL --connect-timeout 15 --speed-limit 1 --speed-time 30 --max-time 3600 {$retry_arg} {$header_arg} -o {$path_arg} {$url_arg}");
         $this->logCommandInfo($cmd);
         logger()->debug('[CURL DOWNLOAD] ' . $cmd);
         $this->passthru($cmd, $this->console_putput, capture_output: false, throw_on_error: true);
@@ -149,13 +149,30 @@ class DefaultShell extends Shell
         };
 
         $mute = $this->console_putput ? '' : ' 2>/dev/null';
-        $tar = SystemTarget::isUnix() ? 'tar' : '"C:\Windows\system32\tar.exe"';
+        $tar = $this->tarExecutable();
         $cmd = "{$tar} {$compression_flag}xf {$archive_arg} --strip-components {$strip} -C {$target_arg}{$mute}";
 
         $this->logCommandInfo($cmd);
         logger()->debug("[TAR EXTRACT] {$cmd}");
         $this->passthruTolerateSymlinks($cmd);
         return true;
+    }
+
+    /**
+     * Execute a tar command to archive the contents of a directory.
+     *
+     * @param string $source_dir   Directory whose contents are archived
+     * @param string $archive_path Path to the tar file to create
+     */
+    public function executeTarCreate(string $source_dir, string $archive_path): void
+    {
+        $archive_arg = escapeshellarg(FileSystem::convertPath($archive_path));
+        $source_arg = escapeshellarg(FileSystem::convertPath($source_dir));
+        $cmd = "{$this->tarExecutable()} -cf {$archive_arg} -C {$source_arg} .";
+
+        $this->logCommandInfo($cmd);
+        logger()->debug("[TAR CREATE] {$cmd}");
+        $this->passthru($cmd, $this->console_putput);
     }
 
     /**
@@ -205,7 +222,7 @@ class DefaultShell extends Shell
         };
 
         $extname = FileSystem::extname($archive_path);
-        $tar = SystemTarget::isUnix() ? 'tar' : '"C:\Windows\system32\tar.exe"';
+        $tar = $this->tarExecutable();
 
         match ($extname) {
             'tar' => $this->executeTarExtract($archive_path, $target_path, 'none'),
@@ -214,6 +231,22 @@ class DefaultShell extends Shell
         };
 
         return true;
+    }
+
+    /**
+     * Build the cURL retry arguments shared by the request and download helpers.
+     *
+     * `--retry` covers transient failures (HTTP 408/429/500/502/503/504 and timeouts) and
+     * removes the partial output file before retrying; `--retry-connrefused` also retries
+     * when a mirror refuses the connection for a moment. Both are supported by the cURL
+     * versions shipped on the supported platforms (7.52+).
+     */
+    private static function curlRetryArgs(int $retries): string
+    {
+        if ($retries <= 0) {
+            return '';
+        }
+        return "--retry {$retries} --retry-delay 2 --retry-connrefused";
     }
 
     /**
@@ -277,5 +310,14 @@ class DefaultShell extends Shell
             }
         }
         return $saw_symlink_error;
+    }
+
+    /**
+     * On Windows the MSYS2 GNU tar comes first in PATH and reads "C:\..." as a remote host:file,
+     * so use the bsdtar shipped with Windows.
+     */
+    private function tarExecutable(): string
+    {
+        return SystemTarget::isUnix() ? 'tar' : '"C:\Windows\System32\tar.exe"';
     }
 }

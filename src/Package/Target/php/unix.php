@@ -118,6 +118,9 @@ trait unix
         if ($option = $package->getBuildOption('with-config-file-scan-dir', false)) {
             $args[] = "--with-config-file-scan-dir={$option}";
         }
+        if ($option = $package->getBuildOption('with-sysconfdir', false)) {
+            $args[] = "--sysconfdir={$option}";
+        }
         // perform enable cli options
         // PHP >= 8.6 links the CLI objects into libphp for do_php_cli()
         $cli = $installer->isPackageResolved('php-cli')
@@ -144,10 +147,26 @@ trait unix
         }
 
         // Configure probes need macOS frameworks, but not static libraries that expose polyfills.
+        $config_util = new SPCConfigUtil();
+        $resolved_package_names = array_keys($installer->getResolvedPackages());
         $libs = SystemTarget::getRuntimeLibs();
+        // Extension configure checks link against static C++ libraries (e.g. -lgearman, -lsnappy),
+        // so the probe link lines need the C++ runtime for the same reason the final link does.
+        if ($libcpp = $config_util->getCppRuntimeLib($resolved_package_names)) {
+            $libs = trim("{$libs} {$libcpp}");
+        }
         if (SystemTarget::getTargetOS() === 'Darwin') {
-            $frameworks = new SPCConfigUtil()->getFrameworksString(array_keys($installer->getResolvedPackages()));
+            $frameworks = $config_util->getFrameworksString($resolved_package_names);
             $libs = trim("{$libs} {$frameworks}");
+
+            // ext/gettext's probe (AC_CHECK_LIB(intl, bindtextdomain)) links the static
+            // libintl.a built by us, which references GNU libiconv symbols
+            // (_libiconv/_libiconv_open) because gettext is configured with
+            // --with-iconv-prefix. macOS libc has no gettext, so the probe cannot fall back
+            // to -lc and fails with "Unable to find required gettext library".
+            if ($installer->isPackageResolved('gettext') && $installer->getLibraryPackage('libiconv') !== null) {
+                $libs = trim("{$libs} -liconv -lcharset");
+            }
         }
 
         // run ./configure with args
@@ -221,6 +240,7 @@ trait unix
     {
         logger()->info('cleaning up php-src build files');
         shell()->cd($package->getSourceDir())->exec('make clean');
+        $this->cleanLinkedExtensionBuildState($package->getSourceDir());
 
         if ($installer->isPackageResolved('php-cli')) {
             $package->runStage([self::class, 'makeCliForUnix']);
@@ -650,6 +670,42 @@ trait unix
     }
 
     /**
+     * Remove build artifacts that `make clean` cannot reach.
+     *
+     * Extension sources are linked into php-src/ext (symlinks on Unix, junctions on Windows), so
+     * the `find` commands of `make clean` do not descend into them: *.lo/*.o/*.dep files from an
+     * earlier build survive. Stale .dep files are not just garbage - they carry absolute header
+     * prerequisites of the tree that produced them, so a build after a PHP version switch can
+     * fail with "No rule to make target .../main/php_config.h" (or silently reuse stale objects).
+     *
+     * @param string $php_src_dir The extracted php-src directory
+     */
+    protected function cleanLinkedExtensionBuildState(string $php_src_dir): void
+    {
+        $php_src_dir = FileSystem::convertPath($php_src_dir);
+        $php_src_real = realpath($php_src_dir);
+        if ($php_src_real === false) {
+            return;
+        }
+        $php_src_prefix = rtrim(FileSystem::convertPath($php_src_real), '/\\') . DIRECTORY_SEPARATOR;
+
+        foreach (glob($php_src_dir . '/ext/*') ?: [] as $link_dir) {
+            if (!FileSystem::isLink($link_dir)) {
+                continue;
+            }
+            $target = realpath($link_dir);
+            if ($target === false) {
+                continue;
+            }
+            $target = FileSystem::convertPath($target);
+            if (str_starts_with($target . DIRECTORY_SEPARATOR, $php_src_prefix)) {
+                continue;
+            }
+            self::removeExtensionBuildArtifacts($target);
+        }
+    }
+
+    /**
      * Seek php-src/config.log when building PHP, add it to exception.
      */
     protected function seekPhpSrcLogFileOnException(callable $callback, string $source_dir): void
@@ -683,6 +739,36 @@ trait unix
         }
         $php .= "echo '[micro-test-end]';\n";
         return $php;
+    }
+
+    /**
+     * Recursively delete libtool/compiler build artifacts (*.lo, *.o, *.dep, *.la, .libs/) inside
+     * an out-of-tree extension source root. Links themselves are left untouched.
+     *
+     * @param string $dir Directory to clean
+     */
+    private static function removeExtensionBuildArtifacts(string $dir): void
+    {
+        foreach (scandir($dir) ?: [] as $item) {
+            if ($item === '.' || $item === '..' || $item === '.git') {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_link($path)) {
+                continue;
+            }
+            if (is_dir($path)) {
+                if ($item === '.libs') {
+                    FileSystem::removeDir($path);
+                    continue;
+                }
+                self::removeExtensionBuildArtifacts($path);
+                continue;
+            }
+            if (preg_match('/\.(?:lo|o|dep|la)$/', $item) === 1) {
+                @unlink($path);
+            }
+        }
     }
 
     /**
